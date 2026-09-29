@@ -1,11 +1,14 @@
 #!/bin/sh
 set -eu
-# Render serves index.html at the site root. Copy the app HTML under that name.
-for f in *.html; do
-  [ "$f" = "index.html" ] && continue
-  cp -f "$f" index.html
-  echo "Copied $f -> index.html"
-  exit 0
-done
-echo "No HTML app file found to copy to index.html" >&2
-exit 1
+python3 - <<'PY'
+import glob
+import os
+import shutil
+
+cands = [f for f in glob.glob("*.html") if os.path.basename(f).lower() != "index.html"]
+if not cands:
+    raise SystemExit("No HTML app file found to copy to index.html")
+src = cands[0]
+shutil.copyfile(src, "index.html")
+print("Copied", src, "-> index.html")
+PY
