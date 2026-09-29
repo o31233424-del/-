@@ -116,15 +116,29 @@
             line-height: 1.15;
         }
         .app-logo {
-            flex: 0 0 48px;
-            width: 48px;
-            height: 48px;
+            flex: 0 0 72px;
+            width: 72px;
+            height: 82px;
             display: block;
-            filter: drop-shadow(0 4px 10px rgba(var(--accent-rgb), 0.28));
+            overflow: visible;
+            color: var(--header-color);
+            filter: drop-shadow(0 3px 8px rgba(var(--accent-rgb), 0.25));
         }
-        .app-logo .logo-mark { fill: var(--header-color); }
-        .app-logo .logo-face { fill: #fff; }
-        .app-logo .logo-win { fill: var(--header-color); }
+        .app-logo .logo-line {
+            fill: none;
+            stroke: currentColor;
+            stroke-linejoin: miter;
+            stroke-linecap: square;
+            stroke-miterlimit: 2.2;
+        }
+        .app-logo .logo-fill { fill: currentColor; }
+        .app-logo .logo-mask { fill: var(--bg-container); }
+        .app-logo .logo-word {
+            fill: currentColor;
+            font-family: Impact, "Arial Black", "Segoe UI", sans-serif;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+        }
         .search-with-map {
             display: grid;
             grid-template-columns: minmax(0, 1fr) minmax(280px, 40%);
@@ -823,7 +837,7 @@
             .wizard-nav .btn { padding: 8px 16px; font-size: 14px; }
             .similar-item { flex-direction: column; align-items: flex-start; }
             .app-title { font-size: 22px; }
-            .app-logo { width: 40px; height: 40px; flex-basis: 40px; }
+            .app-logo { width: 56px; height: 64px; flex-basis: 56px; }
         }
     </style>
 </head>
@@ -834,16 +848,22 @@
     <div class="wizard-header">
         <div>
             <h1 class="app-title">
-                <svg class="app-logo" viewBox="0 0 64 64" role="img" aria-label="Отель">
-                    <title>Отель</title>
-                    <rect class="logo-mark" x="2" y="2" width="60" height="60" rx="18"/>
-                    <rect class="logo-face" x="20" y="13" width="24" height="33" rx="4.5"/>
-                    <rect class="logo-win" x="24.5" y="18" width="6" height="6" rx="1.4"/>
-                    <rect class="logo-win" x="33.5" y="18" width="6" height="6" rx="1.4"/>
-                    <rect class="logo-win" x="24.5" y="26.5" width="6" height="6" rx="1.4"/>
-                    <rect class="logo-win" x="33.5" y="26.5" width="6" height="6" rx="1.4"/>
-                    <rect class="logo-win" x="28.5" y="35" width="7" height="11" rx="1.8"/>
-                    <rect class="logo-face" x="13" y="44" width="38" height="7" rx="3.5"/>
+                <svg class="app-logo" viewBox="0 0 200 236" role="img" aria-label="Hotel">
+                    <title>Hotel</title>
+                    <path class="logo-line" stroke-width="10" d="M26 120 L46 100 L46 150 L26 170 Z"/>
+                    <path class="logo-line" stroke-width="10" d="M48 82 L72 58 L72 126 L48 150 Z"/>
+                    <path class="logo-line" stroke-width="12" d="M74 40 L114 6 L114 100 L74 134 Z"/>
+                    <path class="logo-line" stroke-width="12" d="M114 58 L152 90 L152 140 L114 108"/>
+                    <polygon class="logo-fill" points="86,44 106,26 106,44 86,62"/>
+                    <polygon class="logo-fill" points="86,72 106,54 106,72 86,90"/>
+                    <polygon class="logo-fill" points="86,100 106,82 106,100 86,118"/>
+                    <polygon class="logo-mask" points="40,168 100,102 160,168"/>
+                    <path class="logo-line" stroke-width="14" d="M8 168 H40 L100 102 L160 168 H192"/>
+                    <rect class="logo-fill" x="87" y="134" width="11" height="11"/>
+                    <rect class="logo-fill" x="107" y="134" width="11" height="11"/>
+                    <rect class="logo-fill" x="87" y="154" width="11" height="11"/>
+                    <rect class="logo-fill" x="107" y="154" width="11" height="11"/>
+                    <text class="logo-word" x="100" y="220" text-anchor="middle" font-size="34">HOTEL</text>
                 </svg>
                 Гостиничный аналитик
             </h1>
