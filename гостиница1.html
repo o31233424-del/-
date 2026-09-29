@@ -6,6 +6,8 @@
     <title>Гостиничный аналитик — мастер</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
@@ -101,11 +103,67 @@
             box-shadow: var(--shadow);
             transition: background 0.3s, border-color 0.3s;
         }
-        h1 {
+        h1, .app-title {
             font-size: 28px;
             color: var(--header-color);
             margin-bottom: 6px;
             transition: color 0.3s;
+        }
+        .app-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            line-height: 1.15;
+        }
+        .app-logo {
+            flex: 0 0 52px;
+            width: 52px;
+            height: 52px;
+            display: block;
+        }
+        .app-logo .logo-build { fill: var(--header-color); }
+        .app-logo .logo-cut { fill: var(--bg-container); }
+        .app-logo .logo-sign { fill: var(--header-color); }
+        .app-logo .logo-bed { fill: var(--bg-container); }
+        .app-logo .logo-ground { fill: var(--header-color); opacity: 0.35; }
+        .search-with-map {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 40%);
+            gap: 18px;
+            align-items: start;
+            margin-bottom: 8px;
+        }
+        .search-map-panel {
+            position: sticky;
+            top: 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            min-height: 320px;
+        }
+        .search-map-title {
+            font-weight: 600;
+            font-size: 14px;
+            padding: 10px 12px 8px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        #searchHotelMap {
+            width: 100%;
+            height: 360px;
+            background: var(--bg-input);
+        }
+        .search-map-caption {
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 8px 12px 10px;
+            line-height: 1.35;
+        }
+        @media (max-width: 900px) {
+            .search-with-map { grid-template-columns: 1fr; }
+            .search-map-panel { position: static; }
+            #searchHotelMap { height: 260px; }
         }
         .sub {
             color: var(--text-secondary);
@@ -732,6 +790,8 @@
             .step-dot { min-width: 40px; font-size: 11px; padding: 6px 4px; }
             .wizard-nav .btn { padding: 8px 16px; font-size: 14px; }
             .similar-item { flex-direction: column; align-items: flex-start; }
+            .app-title { font-size: 22px; }
+            .app-logo { width: 42px; height: 42px; flex-basis: 42px; }
         }
     </style>
 </head>
@@ -741,7 +801,24 @@
     <!-- ШАПКА -->
     <div class="wizard-header">
         <div>
-            <h1>🏨 Гостиничный аналитик</h1>
+            <h1 class="app-title">
+                <svg class="app-logo" viewBox="0 0 64 64" role="img" aria-label="Гостиница">
+                    <title>Гостиница / отель</title>
+                    <rect class="logo-ground" x="6" y="56" width="52" height="5" rx="1.5"/>
+                    <path class="logo-build" d="M14 20h36v36H14z"/>
+                    <rect class="logo-cut" x="19" y="25" width="7" height="8" rx="1"/>
+                    <rect class="logo-cut" x="28.5" y="25" width="7" height="8" rx="1"/>
+                    <rect class="logo-cut" x="38" y="25" width="7" height="8" rx="1"/>
+                    <rect class="logo-cut" x="19" y="36" width="7" height="8" rx="1"/>
+                    <rect class="logo-cut" x="38" y="36" width="7" height="8" rx="1"/>
+                    <path class="logo-cut" d="M27 44h10v12H27z"/>
+                    <path class="logo-build" d="M24 44h16l-8-6z"/>
+                    <circle class="logo-sign" cx="32" cy="13" r="9"/>
+                    <rect class="logo-bed" x="26" y="10" width="12" height="7" rx="1.5"/>
+                    <rect class="logo-bed" x="26" y="10" width="4" height="4" rx="1"/>
+                </svg>
+                Гостиничный аналитик
+            </h1>
             <div class="sub">Пошаговый мастер анализа доходности отеля</div>
         </div>
         <div class="theme-controls">
@@ -770,6 +847,8 @@
 
     <!-- ШАГ 1: ПОИСК ОТЕЛЯ -->
     <div class="step-content active" data-step="0">
+        <div class="search-with-map">
+            <div class="search-panel">
         <form id="hotelSearchForm" autocomplete="on">
         <div class="form-row">
             <label for="hotelInput">Название</label>
@@ -803,6 +882,13 @@
             Файл можно открывать напрямую в браузере. Для поиска объектов, номеров и цен нужен интернет.
         </div>
         <div id="searchStatus" class="status-text"></div>
+            </div>
+            <aside class="search-map-panel">
+                <div class="search-map-title">Карта расположения гостиницы</div>
+                <div id="searchHotelMap"></div>
+                <div id="searchMapCaption" class="search-map-caption">После поиска здесь отметится выбранный объект</div>
+            </aside>
+        </div>
         <div id="hotelResults"></div>
         <div id="searchPriceSection"></div>
         <div id="analogsSection"></div>
@@ -1646,6 +1732,9 @@ function showStep(index) {
     });
     currentStep = index;
     localStorage.setItem('currentStep', index);
+    if (index === 0 && typeof refreshSearchMapSize === 'function') {
+        setTimeout(refreshSearchMapSize, 80);
+    }
     if (index === 3) {
         if (typeof initMdpForm === 'function') { try { initMdpForm(); } catch (e) {} }
     }
@@ -1744,6 +1833,93 @@ let selectedHotel = null;
 let enrichRunId = 0;
 const analogsSection = document.getElementById('analogsSection');
 const searchPriceSection = document.getElementById('searchPriceSection');
+const searchMapCaption = document.getElementById('searchMapCaption');
+let searchMap = null;
+let searchMapMarker = null;
+
+function refreshSearchMapSize() {
+    if (searchMap) {
+        try { searchMap.invalidateSize(); } catch {}
+    }
+}
+function ensureSearchMap() {
+    const el = document.getElementById('searchHotelMap');
+    if (!el || typeof L === 'undefined') return null;
+    if (searchMap) return searchMap;
+    searchMap = L.map(el, { scrollWheelZoom: true, zoomControl: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(searchMap);
+    searchMap.setView([61.5, 99], 3);
+    setTimeout(refreshSearchMapSize, 100);
+    return searchMap;
+}
+function setSearchMapCaption(text) {
+    if (searchMapCaption) searchMapCaption.textContent = text || '';
+}
+function resetSearchMap() {
+    setSearchMapCaption('После поиска здесь отметится выбранный объект');
+    const map = ensureSearchMap();
+    if (!map) return;
+    if (searchMapMarker) {
+        map.removeLayer(searchMapMarker);
+        searchMapMarker = null;
+    }
+    map.setView([61.5, 99], 3);
+    setTimeout(refreshSearchMapSize, 50);
+}
+async function geocodeHotelPoint(hotel) {
+    let lat = parseFloat(hotel?.lat);
+    let lon = parseFloat(hotel?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && !(lat === 0 && lon === 0)) return { lat, lon };
+    const q = [hotel?.address, hotel?.name, hotel?._street, hotel?.city].filter(Boolean).join(', ');
+    if (!q) return null;
+    try {
+        const params = new URLSearchParams({
+            q,
+            countrycodes: 'ru',
+            format: 'json',
+            limit: '1',
+            'accept-language': 'ru'
+        });
+        const data = await fetchNominatimJson('https://nominatim.openstreetmap.org/search?' + params, 8000);
+        const p = Array.isArray(data) ? data[0] : null;
+        lat = parseFloat(p?.lat);
+        lon = parseFloat(p?.lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            hotel.lat = lat;
+            hotel.lon = lon;
+            return { lat, lon };
+        }
+    } catch {}
+    return null;
+}
+async function showHotelOnMap(hotel) {
+    const map = ensureSearchMap();
+    if (!map || !hotel) return;
+    setSearchMapCaption('Определяем координаты…');
+    const pt = await geocodeHotelPoint(hotel);
+    if (!pt) {
+        setSearchMapCaption('Координаты объекта не найдены');
+        return;
+    }
+    if (searchMapMarker) map.removeLayer(searchMapMarker);
+    const accent = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#28a745').trim();
+    searchMapMarker = L.circleMarker([pt.lat, pt.lon], {
+        radius: 11,
+        color: accent,
+        weight: 3,
+        fillColor: accent,
+        fillOpacity: 0.85
+    }).addTo(map);
+    const popup = [hotel.name, hotel.address || [hotel._street, hotel.city].filter(Boolean).join(', ')].filter(Boolean).join('<br>');
+    searchMapMarker.bindPopup(popup).openPopup();
+    map.setView([pt.lat, pt.lon], 16);
+    setSearchMapCaption((hotel.name || 'Объект') + (hotel.address ? ' — ' + hotel.address : (hotel.city ? ' — ' + hotel.city : '')));
+    setTimeout(refreshSearchMapSize, 80);
+}
+ensureSearchMap();
 const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 const RACK_COEFF = 0.8;
 const VAT_RATE = 1.22;
@@ -4922,6 +5098,7 @@ async function searchOnline() {
     if (type !== 'all') query += ' ' + type;
 
     hotelResults.innerHTML = `<div style="padding:20px;"><span class="loader"></span> Ищем...</div>`;
+    setSearchMapCaption('Ищем объект на карте…');
     searchStatus.textContent = '⏳ Поиск...';
     searchBtn.disabled = true;
 
@@ -5034,6 +5211,7 @@ async function searchOnline() {
         if (!results.length) {
             hotelResults.innerHTML = `<div class="error">❌ Ничего не найдено.</div>`;
             searchStatus.textContent = 'Результатов: 0';
+            resetSearchMap();
             allSearchResults = [];
             selectedHotel = null;
             selectedHotelIndex = 0;
@@ -5060,6 +5238,7 @@ async function searchOnline() {
     } catch (e) {
         hotelResults.innerHTML = `<div class="error">⚠️ Ошибка: ${e.message}</div>`;
         searchStatus.textContent = '❌ Ошибка';
+        resetSearchMap();
         allSearchResults = [];
         selectedHotel = null;
         selectedHotelIndex = 0;
@@ -5405,9 +5584,10 @@ async function enrichSearchWithAnalogsAndPrices(results, chosen) {
             isMain: false
         }))
     );
-    let html = `<div class="analogs-heading">🏨 Аналогичные объекты (${escapeHtml(primary.city || primary.region || 'регион')})</div>`;
+    let html = `<div class="analogs-heading">🏨 Аналогичные объекты по звёздности (${escapeHtml(primary.city || primary.region || 'регион')})</div>`;
     similar.forEach((h, i) => {
-        const starsDisplay = parseInt(h.stars, 10) ? '⭐ '.repeat(parseInt(h.stars, 10)) : 'не указана';
+        const st = hotelStars(h);
+        const starsDisplay = st ? '⭐ '.repeat(st) : 'не указана';
         const siteHtml = h.site && !missingContact(h.site) && !looksLikeJunkSite(h.site) ? `<a href="${escapeHtml(formatSite(h.site))}" target="_blank">${escapeHtml(formatSite(h.site))}</a>` : 'не указан';
         const dist = h._distanceKm != null ? `${h._distanceKm.toFixed(1)} км` : '—';
         const model = comparisonRows[i + 1].summary;
@@ -5484,6 +5664,7 @@ function renderHotels(hotels) {
         hotelResults.innerHTML = `<div class="error">❌ Ничего не найдено.</div>`;
         searchStatus.textContent = 'Результатов: 0';
         hotelResults.style.display = 'block';
+        resetSearchMap();
         updatePriceHotelSelect();
         return;
     }
@@ -5547,6 +5728,7 @@ function renderHotels(hotels) {
     });
     hotelResults.innerHTML = html;
     hotelResults.style.display = 'block';
+    showHotelOnMap(hotels[selectedHotelIndex] || selectedHotel);
     const sel = hotels[selectedHotelIndex];
     searchStatus.textContent = hotels.length > 1
         ? `Найдено: ${hotels.length}. Выбрана: ${sel && sel.name ? sel.name : '—'}`
@@ -5606,6 +5788,7 @@ clearBtn.addEventListener('click', () => {
     updatePriceHotelSelect();
     if (analogsSection) analogsSection.innerHTML = '';
     if (searchPriceSection) searchPriceSection.innerHTML = '';
+    resetSearchMap();
 });
 [hotelInput, addressInput, streetInput].forEach(el => {
     if (!el) return;
