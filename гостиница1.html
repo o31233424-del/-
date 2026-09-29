@@ -2112,6 +2112,7 @@ function loadStoredPriceBundle(hotel) {
 }
 function savePriceBundle(hotel, bundle) {
     if (!bundle || bundle.empty || !bundle.categories || !Object.keys(bundle.categories).length) return;
+    if (!bundleHasPublishedRates(bundle)) return;
     localStorage.setItem('hotel_prices_' + hotel.name, JSON.stringify(bundle.categories));
     localStorage.setItem('hotel_breakfast_' + hotel.name, String(bundle.breakfastSurcharge || 0));
 }
@@ -2140,7 +2141,7 @@ function getOrBuildPriceBundle(hotel) {
     };
 }
 
-const LIVE_PRICE_PREFIX = 'hotel_live_v33_';
+const LIVE_PRICE_PREFIX = 'hotel_live_v34_';
 const roomCategoryRu = [
     [/президент|presidential/i, 'Президентский', 2.35],
     [/апартамент|apartment/i, 'Апартаменты', 2.05],
@@ -2595,8 +2596,8 @@ function applyProfileToHotel(hotel, facts) {
         if (!looksLikeOtaPhone(p)) hotel.phone = mergePhoneList(hotel.phone, p);
     });
     if (facts.site && !looksLikeJunkSite(facts.site) && (missingContact(hotel.site) || looksLikeJunkSite(hotel.site))) {
-        const fromOsm = /openstreetmap/i.test(facts.source || '');
-        if (isPlausibleHotelSite(facts.site, hotel, { fromOsm })) hotel.site = formatSite(facts.site);
+        const trusted = /openstreetmap|ostrovok|сайт отеля|каталог/i.test(facts.source || '');
+        if (isPlausibleHotelSite(facts.site, hotel, { fromOsm: trusted, trusted })) hotel.site = formatSite(facts.site);
     }
     if (facts.email && missingContact(hotel.email)) hotel.email = facts.email;
     const fromMail = siteFromEmail(hotel.email || facts.email);
@@ -3196,17 +3197,17 @@ async function lookupOstrovok(hotel) {
     hotel._ostrovok = hit;
     const slug = hit.slug || '';
     const pageUrl = `https://ostrovok.ru/hotel/${slug}/mid${hit.master_id}/${hit.otahotel_id}/`;
-    const page = await fetchTextCors(pageUrl, 35000);
-    const facts = parseOstrovokFacts(page) || { totalRooms: null, categories: [], minPrice: null, breakfast: null, source: 'Ostrovok.ru', roomTypes: [] };
-    facts.pageUrl = pageUrl;
-    facts.source = facts.source || 'Ostrovok.ru';
     const wd = nextDow(2);
     const we = nextDow(6);
-    const [wdRates, weRates, datedPage] = await Promise.all([
+    const [page, wdRates, weRates, datedPage] = await Promise.all([
+        fetchTextCors(pageUrl, 22000).catch(() => null),
         fetchOstrovokAllRates(hit, wd, addDays(wd, 1)).catch(() => []),
         fetchOstrovokAllRates(hit, we, addDays(we, 1)).catch(() => []),
-        fetchTextCors(pageUrl + '?dates=' + ostrovokDate(wd) + '-' + ostrovokDate(addDays(wd, 1)) + '&guests=2', 25000).catch(() => null)
+        fetchTextCors(pageUrl + '?dates=' + ostrovokDate(wd) + '-' + ostrovokDate(addDays(wd, 1)) + '&guests=2', 20000).catch(() => null)
     ]);
+    const facts = parseOstrovokFacts(page) || parseOstrovokFacts(datedPage) || { totalRooms: null, categories: [], minPrice: null, breakfast: null, source: 'Ostrovok.ru', roomTypes: [] };
+    facts.pageUrl = pageUrl;
+    facts.source = facts.source || 'Ostrovok.ru';
     let wdAll = wdRates || [];
     if (!wdAll.length && datedPage) {
         const nd = extractNextData(datedPage);
@@ -3680,7 +3681,7 @@ async function lookupOfficialBookingEngine(html, origin) {
 }
 async function lookupOfficialSite(hotel) {
     let root = formatSite(hotel.site || '').replace(/\/$/, '');
-    if (!root || !/^https?:/i.test(root) || looksLikeJunkSite(root) || officialSkipHostRe().test(root) || !isPlausibleHotelSite(root, hotel, { fromOsm: true })) {
+    if (!root || !/^https?:/i.test(root) || looksLikeJunkSite(root) || officialSkipHostRe().test(root) || looksLikeGenericPortalHost(root)) {
         root = String(await searchOfficialSite(hotel) || '').replace(/\/$/, '');
     }
     if (!root || !/^https?:/i.test(root) || looksLikeJunkSite(root) || looksLikeGenericPortalHost(root)) {
@@ -3732,7 +3733,7 @@ async function lookupOfficialSite(hotel) {
         return out;
     };
     const extraHtmls = [];
-    for (const limit of [18, 18]) {
+    for (const limit of [8]) {
         const extra = takeRoomBatch(limit);
         if (!extra.length) break;
         const pages = await Promise.all(extra.map(u => fetchTextCors(u, 10000, { html: true }).then(html => ({ u, html })).catch(() => ({ u, html: null }))));
@@ -3922,11 +3923,8 @@ function isPlausibleHotelSite(url, hotel, opts = {}) {
     let host = '';
     try { host = new URL(formatSite(url)).hostname.replace(/^www\./, '').toLowerCase(); } catch { return false; }
     if (!host) return false;
-    const sc = scoreOfficialHost(host, hotel);
-    if (sc >= 8) return true;
-    if (opts.fromOsm && sc >= 2) return true;
-    if (opts.fromOsm && !distinctiveNameTokens(hotel).length) return true;
-    return false;
+    if (opts.fromOsm || opts.trusted) return true;
+    return scoreOfficialHost(host, hotel) >= 6;
 }
 function pickOfficialHost(html, hotel) {
     if (!html) return '';
@@ -3951,7 +3949,7 @@ function pickOfficialHost(html, hotel) {
         try { consider(decodeURIComponent(m[1]), 3); } catch {}
     }
     const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
-    return best && best[1] >= 8 ? 'https://' + best[0] : '';
+    return best && best[1] >= 6 ? 'https://' + best[0] : '';
 }
 function tidyRoomCategoryName(name) {
     return String(name || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -4398,7 +4396,9 @@ function preferOfficialRoomCategories(facts, official) {
     return facts;
 }
 async function searchOfficialSite(hotel) {
-    if (hotel?.site && isPlausibleHotelSite(hotel.site, hotel, { fromOsm: true })) return formatSite(hotel.site);
+    if (hotel?.site && !looksLikeJunkSite(hotel.site) && !officialSkipHostRe().test(hotel.site) && !looksLikeGenericPortalHost(hotel.site)) {
+        return formatSite(hotel.site);
+    }
     const q = ['официальный сайт', hotel.name, hotel.city, 'отель'].filter(Boolean).join(' ');
     const urls = [
         'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q),
@@ -4424,8 +4424,8 @@ async function lookupPublicCatalogs(hotel) {
         urls.push(`https://html.duckduckgo.com/html/?q=${encodeURIComponent('официальный сайт ' + q)}`);
     });
     let facts = null;
-    for (const u of urls.slice(0, 6)) {
-        const html = await fetchTextCors(u, 12000);
+    const pages = await Promise.all(urls.slice(0, 4).map(u => fetchTextCors(u, 9000).then(html => ({ u, html })).catch(() => ({ u, html: null }))));
+    for (const { u, html } of pages) {
         if (!html || html.length < 400) continue;
         const parsed = parseGenericHotelPage(html, /2gis/i.test(u) ? '2ГИС' : /zoon/i.test(u) ? 'Zoon' : 'поиск сайта');
         if (parsed) facts = mergeFacts(facts, parsed);
@@ -4458,21 +4458,24 @@ async function lookupOsmContacts(hotel) {
 }
 async function fetchLiveHotelFacts(hotel) {
     let facts = null;
-    const contacts = await Promise.all([
+    const otaPromise = settleWithTimeout(lookupOstrovok(hotel).catch(() => null), 52000, null);
+    const sitePromise = settleWithTimeout(lookupOfficialSite(hotel).catch(() => null), 32000, null);
+    const extraPromise = Promise.all([
         lookupOsmContacts(hotel).catch(() => null),
-        lookupPublicCatalogs(hotel).catch(() => null)
+        settleWithTimeout(lookupPublicCatalogs(hotel).catch(() => null), 16000, null),
+        settleWithTimeout(lookup101Hotels(hotel).catch(() => null), 18000, null),
+        settleWithTimeout(fetchWikiRooms(hotel).catch(() => null), 10000, null)
     ]);
-    contacts.forEach(p => {
+    const [siteFacts, otaMain, extra] = await Promise.all([sitePromise, otaPromise, extraPromise]);
+    (Array.isArray(extra) ? extra : []).forEach(p => {
         facts = mergeFacts(facts, p);
         applyProfileToHotel(hotel, p);
     });
     applyProfileToHotel(hotel, facts);
-    if (!hotel.site || looksLikeJunkSite(hotel.site) || officialSkipHostRe().test(hotel.site)) {
-        const found = await searchOfficialSite(hotel).catch(() => '');
-        if (found && isPlausibleHotelSite(found, hotel)) hotel.site = found;
-        else if (hotel.site && (looksLikeJunkSite(hotel.site) || looksLikeGenericPortalHost(hotel.site))) hotel.site = '';
+    if (otaMain) {
+        applyProfileToHotel(hotel, otaMain);
+        facts = mergeFacts(facts, otaMain);
     }
-    let siteFacts = await settleWithTimeout(lookupOfficialSite(hotel).catch(() => null), 42000, null);
     if (siteFacts) {
         applyProfileToHotel(hotel, siteFacts);
         facts = mergeFacts(facts, siteFacts);
@@ -4482,31 +4485,22 @@ async function fetchLiveHotelFacts(hotel) {
     );
     const officialPriced = officialNamed.filter(c => c.weekday || c.weekdayBf || c.weekend || c.weekendBf).length;
     const officialReady = officialNamed.length >= 2 && officialPriced >= officialNamed.length;
-    if (!officialReady) {
+    const hasRates = (facts?.categories || []).some(c => c.weekday || c.weekdayBf || c.weekend || c.weekendBf);
+    if (!officialReady && !hasRates) {
         const rest = await settleWithTimeout(Promise.all([
-            lookupOstrovok(hotel).catch(() => null),
-            lookup101Hotels(hotel).catch(() => null),
             lookupYandexTravel(hotel).catch(() => null),
             lookupYandexTravelExtra(hotel).catch(() => null),
             lookupBooking(hotel).catch(() => null),
             lookupTutu(hotel).catch(() => null),
             lookupSutochno(hotel).catch(() => null),
             lookupTvil(hotel).catch(() => null),
-            lookupBronevik(hotel).catch(() => null),
-            fetchWikiRooms(hotel).catch(() => null)
-        ]), 16000, []);
+            lookupBronevik(hotel).catch(() => null)
+        ]), 20000, []);
         (Array.isArray(rest) ? rest : []).forEach(p => {
             facts = mergeFacts(facts, p);
             applyProfileToHotel(hotel, p);
         });
         applyProfileToHotel(hotel, facts);
-        if (hotel.site && (!siteFacts || !(siteFacts.categories || []).length)) {
-            siteFacts = await settleWithTimeout(lookupOfficialSite(hotel).catch(() => null), 20000, null);
-            if (siteFacts) {
-                facts = mergeFacts(facts, siteFacts);
-                applyProfileToHotel(hotel, siteFacts);
-            }
-        }
     }
     facts = preferOfficialRoomCategories(facts, siteFacts);
     const osmRooms = parseInt(hotel.rooms, 10);
@@ -4515,9 +4509,10 @@ async function fetchLiveHotelFacts(hotel) {
         facts.totalRooms = osmRooms;
         facts.source = (facts.source ? facts.source + ', ' : '') + 'OpenStreetMap';
     }
+    if (!facts.site && hotel.site && !looksLikeJunkSite(hotel.site)) facts.site = hotel.site;
     allocateMissingRoomCounts(facts.categories || [], facts.totalRooms);
     applyProfileToHotel(hotel, facts);
-    if (!facts.totalRooms && !facts.categories.length && !facts.minPrice) return null;
+    if (!facts.totalRooms && !facts.categories.length && !facts.minPrice && !facts.site && !facts.phone) return null;
     return facts;
 }
 function factsToBundle(hotel, facts) {
@@ -4560,7 +4555,7 @@ function factsToBundle(hotel, facts) {
             .map(name => ({ name, rooms: 0, fromGroup: true }));
         allocateMissingRoomCounts(cats, facts.totalRooms || parseInt(hotel?.rooms, 10));
     }
-    if (!cats.length && (facts.minPrice || facts.totalRooms)) {
+    if (!cats.length && facts.minPrice) {
         cats = [{
             name: 'Номер',
             rooms: facts.totalRooms || 0,
@@ -4640,6 +4635,14 @@ function factsToBundle(hotel, facts) {
         fsaLink: facts.fsaLink || ''
     };
 }
+function bundleHasPublishedRates(bundle) {
+    const cats = Object.values(bundle?.categories || {});
+    return cats.some(c => {
+        if ((Number(c.bfWeekday) || 0) > 0 || (Number(c.bfWeekend) || 0) > 0) return true;
+        const prices = c.prices || {};
+        return Object.keys(prices).some(m => (Number(prices[m]?.weekday) || 0) > 0 || (Number(prices[m]?.weekend) || 0) > 0);
+    });
+}
 function loadLiveBundle(hotel) {
     try {
         const raw = localStorage.getItem(LIVE_PRICE_PREFIX + hotel.name);
@@ -4647,13 +4650,14 @@ function loadLiveBundle(hotel) {
         const parsed = JSON.parse(raw);
         if (parsed.empty || !parsed.categories || !Object.keys(parsed.categories).length) return null;
         if (looksLikeFakeCategories(parsed.categories)) return null;
+        if (!bundleHasPublishedRates(parsed)) return null;
         if (Date.now() - (parsed.savedAt || 0) > 24 * 3600 * 1000) return null;
         return parsed;
     } catch { return null; }
 }
 function saveLiveBundle(hotel, bundle) {
     try {
-        if (!bundle || bundle.empty || looksLikeFakeCategories(bundle.categories)) return;
+        if (!bundle || bundle.empty || looksLikeFakeCategories(bundle.categories) || !bundleHasPublishedRates(bundle)) return;
         localStorage.setItem(LIVE_PRICE_PREFIX + hotel.name, JSON.stringify({ ...bundle, savedAt: Date.now() }));
         savePriceBundle(hotel, bundle);
     } catch {}
@@ -4672,7 +4676,7 @@ async function resolvePriceBundle(hotel) {
         applyProfileToHotel(hotel, bundle);
         if (facts.totalRooms) hotel.rooms = facts.totalRooms;
         hotel._priceSource = bundle.source;
-        if (bundle && !bundle.empty) saveLiveBundle(hotel, bundle);
+        if (bundle && !bundle.empty && bundleHasPublishedRates(bundle)) saveLiveBundle(hotel, bundle);
         return bundle;
     }
     return {
@@ -5340,7 +5344,7 @@ async function enrichSearchWithAnalogsAndPrices(results, chosen) {
 
     const analogBundles = await Promise.all(similar.map(h => settleWithTimeout(
         resolvePriceBundle(h).catch(() => ({ empty: true, categories: {}, source: 'открытые данные' })),
-        22000,
+        55000,
         { empty: true, categories: {}, source: 'открытые данные' }
     )));
     analogBundles.forEach((b, i) => {
