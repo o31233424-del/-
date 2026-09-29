@@ -1823,13 +1823,18 @@ function attachRackRatesFromHtml(facts, html) {
         if (c.weekday || c.price) return;
         const name = tidyRoomCategoryName(c.name);
         if (!name || name.length < 4) return;
-        const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const re = new RegExp(esc + '[\\s\\S]{0,220}?(?:от|цена[:\\s]+)([\\d\\s\\u00a0]{3,8})\\s*(?:₽|руб)', 'i');
-        const chunk = (text.match(re) || [])[0] || '';
-        const price = extractRackPrice(chunk) || parseMoney((text.match(re) || [])[1]);
-        if (price >= 400) {
-            c.weekday = price;
-            c.price = price;
+        const stems = [...new Set([name, commercialCategoryName(name)].filter(s => s && s.length >= 4))];
+        for (const stem of stems) {
+            const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp(esc + '[\\s\\S]{0,700}?(?:от\\s*|цена[:\\s]+)?([\\d\\s\\u00a0]{3,8})\\s*(?:₽|руб)', 'i');
+            const chunk = (text.match(re) || [])[0] || '';
+            if (extraPersonNear(chunk, Math.max(0, chunk.length - 12))) continue;
+            const price = extractRackPrice(chunk) || parseMoney((text.match(re) || [])[1]);
+            if (price >= 400) {
+                c.weekday = price;
+                c.price = price;
+                break;
+            }
         }
     });
     if (facts.categories.length === 1 && !(facts.categories[0].weekday || facts.categories[0].price)) {
@@ -1924,6 +1929,49 @@ function locationFromNominatim(place) {
         city: a.city || a.town || a.village || a.municipality || a.hamlet || '',
         region: a.state || a.region || a.county || ''
     };
+}
+function hotelMatchesCity(hotel, city) {
+    const want = foldAddr(city);
+    if (!want || want.length < 3) return true;
+    const blob = foldAddr([hotel?.city, hotel?.region, hotel?.address, hotel?.display_name, hotel?.name].filter(Boolean).join(' '));
+    if (!blob) return false;
+    if (blob.includes(want)) return true;
+    const slug = translitSlug(city).replace(/_/g, '');
+    if (slug.length >= 4 && blob.includes(foldAddr(slug))) return true;
+    if (want.length >= 6 && blob.includes(want.slice(0, want.length - 1))) return true;
+    return false;
+}
+function ostrovokHitMatchesCity(h, city) {
+    if (!city) return true;
+    return hotelMatchesCity({
+        city: h.region_name || '',
+        address: h.hotel_address || '',
+        name: h.hotel_name || '',
+        display_name: [h.hotel_name, h.hotel_address, h.region_name].filter(Boolean).join(', ')
+    }, city);
+}
+async function nominatimCityViewbox(city) {
+    if (!city) return '';
+    const params = new URLSearchParams({
+        q: city,
+        countrycodes: 'ru',
+        format: 'json',
+        limit: '1',
+        addressdetails: '1',
+        'accept-language': 'ru'
+    });
+    try {
+        const data = await fetchNominatimJson(`https://nominatim.openstreetmap.org/search?${params}`, 8000);
+        const p = Array.isArray(data) ? data[0] : null;
+        const bb = p?.boundingbox;
+        if (!bb || bb.length < 4) return '';
+        const pad = 0.12;
+        const south = Number(bb[0]) - pad;
+        const north = Number(bb[1]) + pad;
+        const west = Number(bb[2]) - pad;
+        const east = Number(bb[3]) + pad;
+        return `${west},${north},${east},${south}`;
+    } catch { return ''; }
 }
 function normalizeHotelType(type) {
     const t = String(type || '').toLowerCase();
@@ -2467,9 +2515,18 @@ function formatSite(s) {
     if (/^[\w.-]+\.[a-z]{2,}(\/|$)/i.test(v)) return 'https://' + v.split(/[\s)\]>'"]/)[0];
     return v;
 }
+function looksLikeGenericPortalHost(s) {
+    let h = String(s || '').toLowerCase().trim();
+    h = h.replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
+    if (!h || !/\./.test(h)) return false;
+    if (/^(sk|go|ok|ya|mail|rambler|wix|tilda|ucoz|narod|bitrix24|nethouse)\.[a-z]{2,}$/.test(h)) return true;
+    if (/^[a-z0-9]{1,2}\.[a-z]{2,3}$/.test(h)) return true;
+    return /\b(2gis|zoon\.ru|spravker|yell\.ru|orgpage|rusprofile|spark-interfax|list-org|sbis\.ru|russpass|culture\.ru|visit-|spravka\.city)\b/.test(h);
+}
 function looksLikeJunkSite(s) {
     const v = String(s || '').toLowerCase();
     if (!v) return true;
+    if (looksLikeGenericPortalHost(v)) return true;
     return /ostrovok|booking\.com|yandex|tutu\.ru|101hotels|hotelscdn|sutochno|tvil|bronevik|facebook|vk\.com|zoon|2gis|tripadvisor|google|wikipedia|duckduckgo|jina\.ai|cloudflare|wixstatic|tildacdn|visitrybinsk|spravka\.city|cheap-hotels|vashotel|edem-v-gosti|travelandia|servicepipe|ddos-guard|qrator|\/images\/|\.svg(\?|$)|logo\.|cdn\.|\.(jpg|png|gif|css|js|webp)(\?|$)/i.test(v);
 }
 function looksLikeOtaPhone(p) {
@@ -2522,6 +2579,7 @@ function siteFromEmail(email) {
     if (!m) return '';
     const host = m[1].toLowerCase();
     if (/gmail|yandex|mail\.ru|yahoo|hotmail|icloud|outlook|ostrovok|booking|tutu|101hotels/.test(host)) return '';
+    if (looksLikeGenericPortalHost(host)) return '';
     return 'https://' + host;
 }
 function applyProfileToHotel(hotel, facts) {
@@ -2533,10 +2591,13 @@ function applyProfileToHotel(hotel, facts) {
     extractPhones(facts.phone).forEach(p => {
         if (!looksLikeOtaPhone(p)) hotel.phone = mergePhoneList(hotel.phone, p);
     });
-    if (facts.site && !looksLikeJunkSite(facts.site) && (missingContact(hotel.site) || looksLikeJunkSite(hotel.site))) hotel.site = formatSite(facts.site);
+    if (facts.site && !looksLikeJunkSite(facts.site) && (missingContact(hotel.site) || looksLikeJunkSite(hotel.site))) {
+        const fromOsm = /openstreetmap/i.test(facts.source || '');
+        if (isPlausibleHotelSite(facts.site, hotel, { fromOsm })) hotel.site = formatSite(facts.site);
+    }
     if (facts.email && missingContact(hotel.email)) hotel.email = facts.email;
     const fromMail = siteFromEmail(hotel.email || facts.email);
-    if (fromMail && (missingContact(hotel.site) || looksLikeJunkSite(hotel.site))) hotel.site = fromMail;
+    if (fromMail && (missingContact(hotel.site) || looksLikeJunkSite(hotel.site)) && isPlausibleHotelSite(fromMail, hotel, { fromOsm: true })) hotel.site = fromMail;
     const rooms = Number(facts.totalRooms);
     if (rooms > 0 && (missingContact(hotel.rooms) || /сайт отеля/i.test(facts.source || ''))) hotel.rooms = rooms;
     if (facts.fsaLink) hotel.fsaLink = facts.fsaLink;
@@ -2734,10 +2795,9 @@ function parseGenericHotelPage(html, source) {
         || text.match(/(\+7[\s()-]*\d[\d\s()-]{9,24})/)
         || html.match(/tel:\+?(\d{11,12})/i);
     if (tel && !looksLikeOtaPhone(tel[1])) facts.phone = tel[0].startsWith('tel:') ? tel[1] : tel[1];
-    const siteM = html.match(/href=["'](https?:\/\/(?!(?:www\.)?(?:ostrovok|booking|yandex|tutu|101hotels|sutochno|tvil|bronevik|facebook|vk\.com|2gis|zoon))[^"'>\s]+)["']/i)
-        || text.match(/(https?:\/\/(?:www\.)?(?!ostrovok|booking|yandex|2gis|zoon)[a-z0-9.-]+\.[a-z]{2,}[^ \n]{0,40})/i)
-        || html.match(/"(?:website|site|url|officialSite)"\s*:\s*"(https?:\/\/[^"]+|www\.[^"]+|[a-z0-9.-]+\.[a-z]{2,}[^"]*)"/i);
-    if (siteM && !looksLikeJunkSite(siteM[1])) facts.site = siteM[1].replace(/[),.;]+$/, '');
+    const siteM = html.match(/"(?:website|homepage|officialSite|official_site)"\s*:\s*"(https?:\/\/[^"]+|www\.[^"]+|[a-z0-9.-]+\.[a-z]{2,}[^"]*)"/i)
+        || html.match(/href=["'](https?:\/\/(?!(?:www\.)?(?:ostrovok|booking|yandex|tutu|101hotels|sutochno|tvil|bronevik|facebook|vk\.com|2gis|zoon|sk\.ru))[^"'>\s]+)["'][^>]*(?:официал|сайт отеля)/i);
+    if (siteM && !looksLikeJunkSite(siteM[1]) && !looksLikeGenericPortalHost(siteM[1])) facts.site = siteM[1].replace(/[),.;]+$/, '');
     const em = text.match(/[a-z0-9._%+-]+@(?:(?!gmail|yandex|mail\.ru|ostrovok)[a-z0-9.-]+\.[a-z]{2,})/i);
     if (em) {
         facts.email = em[0];
@@ -2835,7 +2895,7 @@ function mergeFacts(base, extra) {
     extractPhones(extra.phone).forEach(p => {
         if (!looksLikeOtaPhone(p)) base.phone = mergePhoneList(base.phone, p);
     });
-    if ((!base.site || looksLikeJunkSite(base.site)) && extra.site && !looksLikeJunkSite(extra.site)) base.site = extra.site;
+    if ((!base.site || looksLikeJunkSite(base.site)) && extra.site && !looksLikeJunkSite(extra.site) && !looksLikeGenericPortalHost(extra.site)) base.site = extra.site;
     if (!base.email && extra.email) base.email = extra.email;
     if ((!base.site || looksLikeJunkSite(base.site)) && extra.email) {
         const fromMail = siteFromEmail(extra.email);
@@ -3059,7 +3119,7 @@ function hotelSearchQueries(hotel) {
     add(`${name} ${streetName} ${house} ${city}`);
     add(`${streetName} ${house} ${city} отель`);
     add(`${city} ${streetName} ${house}`);
-    add(name);
+    if (!city) add(name);
     return out;
 }
 function scoreOstrovokHit(h, hotel) {
@@ -3073,7 +3133,10 @@ function scoreOstrovokHit(h, hotel) {
     const house = extractHouseNo(blob);
     const street = extractStreetKey(blob) || foldAddr(hotel._street || '');
     if (name && hn && name.length >= 4 && (hn.includes(name.slice(0, 6)) || name.includes(hn.slice(0, 6)))) s += 5;
-    if (city && city.length >= 4 && (cityH.includes(city) || city.includes(cityH))) s += 4;
+    if (city && city.length >= 3) {
+        if (!(cityH.includes(city) || city.includes(cityH) || addr.includes(city))) return 0;
+        s += 6;
+    }
     if (house && addr.includes(house)) s += 12;
     if (street && street.length >= 5 && addr.includes(street.slice(0, 6))) s += 8;
     return s;
@@ -3373,6 +3436,15 @@ function attachOfficialBookingPrices(facts, pricedCats) {
         if (!(pc.weekday || pc.weekend || pc.weekdayBf || pc.weekendBf || pc.name)) return;
         let cat = facts.categories.find(c => c.roomTypeId && pc.roomTypeId && String(c.roomTypeId) === String(pc.roomTypeId));
         if (!cat && pc.name) cat = facts.categories.find(c => isSameOfficialRoom(c.name, pc.name));
+        if (!cat && pc.name) {
+            let best = null, bestS = 0;
+            facts.categories.forEach(c => {
+                if (!(c.name && pc.name)) return;
+                const sc = categoryMatchScore(c.name, pc.name);
+                if (sc > bestS) { bestS = sc; best = c; }
+            });
+            if (best && bestS >= 22) cat = best;
+        }
         if (!cat) {
             cat = { name: pc.name, rooms: 0, fromGroup: true, official: true };
             facts.categories.push(cat);
@@ -3390,8 +3462,37 @@ function attachOfficialBookingPrices(facts, pricedCats) {
         cat.priceSource = 'сайт отеля';
         if (!cat.name && pc.name) cat.name = pc.name;
     });
+    fillMissingOfficialPrices(facts);
     const priced = facts.categories.filter(c => c.weekday || c.weekdayBf);
     if (priced.length) facts.minPrice = Math.min(...priced.map(c => c.weekday || c.weekdayBf));
+    return facts;
+}
+function fillMissingOfficialPrices(facts) {
+    if (!facts?.categories?.length) return facts;
+    fillTravelLineMonthGrid(Object.fromEntries(facts.categories.map((c, i) => [i, c])));
+    facts.categories.forEach(c => {
+        if (!c.weekend && c.weekday) c.weekend = c.weekday;
+        if (!c.weekendBf && c.weekdayBf) c.weekendBf = c.weekdayBf;
+        if (!c.weekday && c.weekend) c.weekday = c.weekend;
+        if (!c.weekdayBf && c.weekendBf) c.weekdayBf = c.weekendBf;
+    });
+    const priced = () => facts.categories.filter(c => c.weekday || c.weekdayBf || c.weekend || c.weekendBf);
+    facts.categories.forEach(c => {
+        if (c.weekday || c.weekdayBf || c.weekend || c.weekendBf) return;
+        let best = null, bestS = 0;
+        priced().forEach(p => {
+            const sc = categoryMatchScore(c.name, p.name);
+            if (sc > bestS) { bestS = sc; best = p; }
+        });
+        if (best && bestS >= 18) copyCategoryRates(c, best);
+    });
+    facts.categories.forEach(c => {
+        if (c.weekday || c.weekdayBf || c.weekend || c.weekendBf) return;
+        const co = commercialCategoryName(c.name);
+        if (!co) return;
+        const sib = priced().find(p => commercialCategoryName(p.name) === co);
+        if (sib) copyCategoryRates(c, sib);
+    });
     return facts;
 }
 async function lookupTravelLineRates(html) {
@@ -3576,10 +3677,13 @@ async function lookupOfficialBookingEngine(html, origin) {
 }
 async function lookupOfficialSite(hotel) {
     let root = formatSite(hotel.site || '').replace(/\/$/, '');
-    if (!root || !/^https?:/i.test(root) || looksLikeJunkSite(root) || officialSkipHostRe().test(root)) {
-        root = (await searchOfficialSite(hotel)).replace(/\/$/, '');
+    if (!root || !/^https?:/i.test(root) || looksLikeJunkSite(root) || officialSkipHostRe().test(root) || !isPlausibleHotelSite(root, hotel, { fromOsm: true })) {
+        root = String(await searchOfficialSite(hotel) || '').replace(/\/$/, '');
     }
-    if (!root || !/^https?:/i.test(root)) return null;
+    if (!root || !/^https?:/i.test(root) || looksLikeJunkSite(root) || looksLikeGenericPortalHost(root)) {
+        if (hotel.site && (looksLikeJunkSite(hotel.site) || looksLikeGenericPortalHost(hotel.site))) hotel.site = '';
+        return null;
+    }
     hotel.site = root;
     const origin = siteOrigin(root) || root;
     const seeds = [
@@ -3650,6 +3754,8 @@ async function lookupOfficialSite(hotel) {
         if (booked.breakfast) facts.breakfast = facts.breakfast || booked.breakfast;
     }
     if (facts) {
+        attachRackRatesFromHtml(facts, allHtml);
+        fillMissingOfficialPrices(facts);
         facts.site = origin;
         facts.pageUrl = origin + '/rooms';
         facts.source = 'сайт отеля';
@@ -3755,7 +3861,7 @@ async function lookupYandexTravelExtra(hotel) {
     return parseGenericHotelPage(html, 'Яндекс Путешествия');
 }
 function officialSkipHostRe() {
-    return /ostrovok|booking\.com|yandex|tutu\.ru|101hotels|sutochno|tvil|bronevik|facebook|vk\.com|zoon|2gis|tripadvisor|google|wikipedia|duckduckgo|jina\.ai|cloudflare|hotels\.com|expedia|trivago|agoda|tlintegration|hopenapi|travelline|reservationsteps|bnovo/i;
+    return /ostrovok|booking\.com|yandex|tutu\.ru|101hotels|sutochno|tvil|bronevik|facebook|vk\.com|zoon|2gis|tripadvisor|google|wikipedia|duckduckgo|jina\.ai|cloudflare|hotels\.com|expedia|trivago|agoda|tlintegration|hopenapi|travelline|reservationsteps|bnovo|\bsk\.ru\b/i;
 }
 function unwrapTrackedUrl(raw) {
     let v = String(raw || '').trim();
@@ -3783,42 +3889,66 @@ function hotelNameTokens(hotel) {
     if (city.length >= 4) tokens.push(city);
     return tokens;
 }
+function distinctiveNameTokens(hotel) {
+    const stop = /^(hotel|otel|official|sajt|site|www|the|гостиница|отель|гостиничный|комплекс|парк|plaza|palace|grand|best|western|inn|house|club|spa|resort|and|сеть)$/;
+    const tokens = [];
+    String(hotel?.name || '').split(/[\s\-–,._/«»"']+/).forEach(p => {
+        const w = foldAddr(p);
+        const lat = translitSlug(p).replace(/_/g, '');
+        if (w.length >= 4 && !stop.test(w)) tokens.push(w);
+        if (lat.length >= 4 && !stop.test(lat) && lat !== w) tokens.push(lat);
+    });
+    return [...new Set(tokens)];
+}
 function scoreOfficialHost(host, hotel) {
     const h = String(host || '').toLowerCase().replace(/^www\./, '');
-    if (!h || officialSkipHostRe().test(h) || looksLikeJunkSite(h)) return 0;
+    if (!h || officialSkipHostRe().test(h) || looksLikeJunkSite(h) || looksLikeGenericPortalHost(h)) return 0;
     let s = 0;
-    if (/hotel|otel|inn|гостиниц/.test(h)) s += 4;
-    hotelNameTokens(hotel).forEach(w => {
-        if (h.includes(w.slice(0, Math.min(6, w.length)))) s += 6;
+    if (/hotel|otel|inn|apart/.test(h)) s += 2;
+    distinctiveNameTokens(hotel).forEach(w => {
+        if (w.length >= 5 && h.includes(w)) s += 12;
+        else if (w.length >= 4 && h.includes(w)) s += 8;
+        else if (w.length >= 6 && h.includes(w.slice(0, 6))) s += 4;
     });
-    const city = translitSlug(hotel?.city || '');
-    if (city.length >= 4 && h.includes(city.slice(0, 5))) s += 3;
+    const city = translitSlug(hotel?.city || '').replace(/_/g, '');
+    if (city.length >= 5 && h.includes(city)) s += 3;
     return s;
+}
+function isPlausibleHotelSite(url, hotel, opts = {}) {
+    if (!url || looksLikeJunkSite(url) || officialSkipHostRe().test(url) || looksLikeGenericPortalHost(url)) return false;
+    let host = '';
+    try { host = new URL(formatSite(url)).hostname.replace(/^www\./, '').toLowerCase(); } catch { return false; }
+    if (!host) return false;
+    const sc = scoreOfficialHost(host, hotel);
+    if (sc >= 8) return true;
+    if (opts.fromOsm && sc >= 2) return true;
+    if (opts.fromOsm && !distinctiveNameTokens(hotel).length) return true;
+    return false;
 }
 function pickOfficialHost(html, hotel) {
     if (!html) return '';
-    const labeled = html.match(/"(?:website|site|url|officialSite)"\s*:\s*"(https?:\/\/[^"]+|www\.[^"]+|[a-z0-9.-]+\.[a-z]{2,}[^"]*)"/i);
-    if (labeled && !looksLikeJunkSite(labeled[1]) && !officialSkipHostRe().test(labeled[1])) return formatSite(labeled[1]);
     const scores = {};
-    const re = /https?:\/\/(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
+    const consider = (raw, bonus) => {
+        const url = formatSite(unwrapTrackedUrl(raw));
+        if (!url || looksLikeJunkSite(url) || officialSkipHostRe().test(url) || looksLikeGenericPortalHost(url)) return;
+        let host = '';
+        try { host = new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return; }
+        if (!host || officialSkipHostRe().test(host) || looksLikeGenericPortalHost(host)) return;
+        const sc = scoreOfficialHost(host, hotel) + (bonus || 0);
+        if (sc <= 0) return;
+        scores[host] = Math.max(scores[host] || 0, sc);
+    };
+    const labeled = /"(?:website|homepage|officialSite|official_site)"\s*:\s*"(https?:\/\/[^"]+|www\.[^"]+|[a-z0-9.-]+\.[a-z]{2,}[^"]*)"/gi;
     let m;
-    while ((m = re.exec(html))) {
-        const host = m[1].toLowerCase();
-        if (officialSkipHostRe().test(host) || looksLikeJunkSite(host)) continue;
-        const sc = scoreOfficialHost(host, hotel);
-        scores[host] = Math.max(scores[host] || 0, sc) + 1;
-    }
+    while ((m = labeled.exec(html))) consider(m[1], 4);
+    const re = /https?:\/\/(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
+    while ((m = re.exec(html))) consider('https://' + m[1], 0);
     const md = /uddg=([^&"']+)/gi;
     while ((m = md.exec(html))) {
-        try {
-            const u = decodeURIComponent(m[1]);
-            const host = new URL(u).hostname.replace(/^www\./, '').toLowerCase();
-            if (officialSkipHostRe().test(host) || looksLikeJunkSite(host)) continue;
-            scores[host] = Math.max(scores[host] || 0, scoreOfficialHost(host, hotel)) + 3;
-        } catch {}
+        try { consider(decodeURIComponent(m[1]), 3); } catch {}
     }
     const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
-    return best && best[1] >= 5 ? 'https://' + best[0] : '';
+    return best && best[1] >= 8 ? 'https://' + best[0] : '';
 }
 function tidyRoomCategoryName(name) {
     return String(name || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -4265,7 +4395,7 @@ function preferOfficialRoomCategories(facts, official) {
     return facts;
 }
 async function searchOfficialSite(hotel) {
-    if (hotel?.site && !looksLikeJunkSite(hotel.site) && !officialSkipHostRe().test(hotel.site)) return formatSite(hotel.site);
+    if (hotel?.site && isPlausibleHotelSite(hotel.site, hotel, { fromOsm: true })) return formatSite(hotel.site);
     const q = ['официальный сайт', hotel.name, hotel.city, 'отель'].filter(Boolean).join(' ');
     const urls = [
         'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q),
@@ -4317,7 +4447,7 @@ async function lookupOsmContacts(hotel) {
         const site = extra.website || extra.url || extra['contact:website'];
         const rooms = parseInt(extra.rooms || extra['rooms:count'] || extra.rooms, 10);
         if (phone && !looksLikeOtaPhone(phone)) facts.phone = phone;
-        if (site) facts.site = site;
+        if (site && !looksLikeJunkSite(site) && !looksLikeGenericPortalHost(site)) facts.site = site;
         if (rooms > 0) facts.totalRooms = rooms;
         if (!facts.phone && !facts.site && !facts.totalRooms) return null;
         return facts;
@@ -4336,7 +4466,8 @@ async function fetchLiveHotelFacts(hotel) {
     applyProfileToHotel(hotel, facts);
     if (!hotel.site || looksLikeJunkSite(hotel.site) || officialSkipHostRe().test(hotel.site)) {
         const found = await searchOfficialSite(hotel).catch(() => '');
-        if (found) hotel.site = found;
+        if (found && isPlausibleHotelSite(found, hotel)) hotel.site = found;
+        else if (hotel.site && (looksLikeJunkSite(hotel.site) || looksLikeGenericPortalHost(hotel.site))) hotel.site = '';
     }
     let siteFacts = await settleWithTimeout(lookupOfficialSite(hotel).catch(() => null), 42000, null);
     if (siteFacts) {
@@ -4451,6 +4582,7 @@ function factsToBundle(hotel, facts) {
             fsaLink: facts.fsaLink || ''
         };
     }
+    fillMissingOfficialPrices({ categories: cats });
     const minPrice = facts.weekdayPrice || facts.minPrice || null;
     const categories = {};
     cats.forEach(cat => {
@@ -4708,13 +4840,22 @@ function hotelFromNominatimPlace(p, userCtx = {}) {
         if (!isWeakHotelName(qn)) name = qn;
     }
     if (isWeakHotelName(name)) name = p.display_name.split(',')[0] || 'Без названия';
-    const city = loc.city || userCtx.city || addressInput.value.trim();
+    const siteRaw = extra.website || extra['contact:website'] || '';
+    const hotelDraft = {
+        name,
+        address: p.display_name,
+        city: loc.city,
+        region: loc.region,
+        display_name: p.display_name
+    };
+    let city = loc.city;
+    if (!city && userCtx.city && hotelMatchesCity(hotelDraft, userCtx.city)) city = userCtx.city;
     return {
         name,
         address: p.display_name,
         type: extra.tourism || (p.type && p.type !== 'yes' ? p.type : '') || p.class || 'hotel',
         phone: extra.phone || extra['contact:phone'] || 'не указан',
-        site: extra.website || extra.url || extra['contact:website'] || '',
+        site: siteRaw && !looksLikeJunkSite(siteRaw) && !looksLikeGenericPortalHost(siteRaw) ? siteRaw : '',
         stars: extra.stars || 'не указана',
         rooms: extra.rooms || extra['rooms:count'] || 'не указано',
         osm_id: p.osm_id,
@@ -4779,6 +4920,7 @@ async function searchOnline() {
 
     try {
         const userCtx = { name, city, street, query };
+        const viewbox = city ? await nominatimCityViewbox(city) : '';
         const nominatim = async (q) => {
             const params = new URLSearchParams({
                 q,
@@ -4790,17 +4932,25 @@ async function searchOnline() {
                 namedetails: '1',
                 'accept-language': 'ru'
             });
+            if (viewbox) {
+                params.set('viewbox', viewbox);
+                params.set('bounded', '1');
+            }
             try { return await fetchNominatimJson(`https://nominatim.openstreetmap.org/search?${params}`, 10000); }
             catch { return []; }
         };
         const qList = [...new Set([
             query,
             name && city ? `${name} ${city}` : '',
-            `${query} отель`,
-            name ? `${name} гостиница` : '',
-            street && (city || name) ? `${street} ${city || name} гостиница` : ''
+            city ? `${query} отель` : `${query} отель`,
+            name && city ? `${name} гостиница ${city}` : (!city && name ? `${name} гостиница` : ''),
+            street && city ? `${street} ${city} гостиница` : (!city && street && name ? `${street} ${name} гостиница` : '')
         ].filter(Boolean))];
-        const otaQueries = [...new Set([query, name, [name, city].filter(Boolean).join(' ')].filter(q => q && q.length >= 2))].slice(0, 3);
+        const otaQueries = [...new Set([
+            [name, city].filter(Boolean).join(' '),
+            query,
+            !city && name ? name : ''
+        ].filter(q => q && q.length >= 2))].slice(0, 3);
         const [osmBatches, otaBatches] = await Promise.all([
             Promise.all(qList.slice(0, 4).map(nominatim)),
             Promise.all(otaQueries.map(q => fetchOstrovokHits(q).catch(() => [])))
@@ -4813,11 +4963,13 @@ async function searchOnline() {
             data.push(p);
         });
         let results = data.map(p => hotelFromNominatimPlace(p, userCtx));
+        if (city) results = results.filter(r => hotelMatchesCity(r, city));
         const otaHits = [];
         const seenOta = new Set();
         (otaBatches || []).flat().forEach(h => {
             const id = String(h.otahotel_id || h.master_id || h.slug || '');
             if (!id || seenOta.has(id)) return;
+            if (city && !ostrovokHitMatchesCity(h, city)) return;
             seenOta.add(id);
             otaHits.push(h);
         });
@@ -4825,28 +4977,27 @@ async function searchOnline() {
         otaHotels.forEach(oh => {
             oh._userQuery = query;
             oh._street = street;
-            if (city && !oh.city) oh.city = city;
             const house = extractHouseNo(oh.address);
             const dup = results.find(r => {
                 const rh = extractHouseNo(r.address + ' ' + r.name);
                 const sameHouse = house && rh && house === rh;
                 const sameCity = foldAddr(r.city) && foldAddr(oh.city) && foldAddr(r.city).includes(foldAddr(oh.city).slice(0, 5));
                 const sameName = foldAddr(r.name) && foldAddr(oh.name) && (foldAddr(r.name).includes(foldAddr(oh.name).slice(0, 8)) || foldAddr(oh.name).includes(foldAddr(r.name).slice(0, 8)));
-                return (sameHouse && sameCity) || (sameName && sameCity);
+                return (sameHouse && sameCity) || (sameName && sameCity) || (sameName && city && hotelMatchesCity(r, city) && hotelMatchesCity(oh, city));
             });
             if (dup) {
                 if (isWeakHotelName(dup.name)) dup.name = oh.name;
                 dup._ostrovok = oh._ostrovok;
                 if (!dup.city) dup.city = oh.city;
-            } else {
+            } else if (!city || hotelMatchesCity(oh, city)) {
                 results.push(oh);
             }
         });
         results.forEach(r => {
             r._userQuery = query;
             r._street = street || r._street;
-            if (city && !r.city) r.city = city;
         });
+        if (city) results = results.filter(r => hotelMatchesCity(r, city));
         if (!results.length) {
             const synthetic = hotelFromUserQuery(userCtx);
             if (synthetic) results = [synthetic];
@@ -4866,6 +5017,8 @@ async function searchOnline() {
                     if (hn === qn) s += 20;
                     else if (hn.includes(qn.slice(0, 8)) || qn.includes(hn.slice(0, 8))) s += 14;
                 }
+                if (city && hotelMatchesCity(h, city)) s += 12;
+                if (looksLikeGenericPortalHost(h.site) || looksLikeJunkSite(h.site)) s -= 8;
                 if (h._synthetic) s -= 4;
                 return s;
             };
@@ -4930,7 +5083,7 @@ function mapOverpassHotel(el, fallbackHotel) {
         address: addressParts.join(', ') || fallbackHotel.address || 'Адрес не указан',
         type: tags.tourism || 'hotel',
         phone: tags.phone || tags['contact:phone'] || 'не указан',
-        site: tags.website || tags['contact:website'] || tags.url || '',
+        site: tags.website || tags['contact:website'] || '',
         stars: tags.stars || '',
         rooms: tags.rooms || tags['rooms:count'] || 'не указано',
         osm_id: el.id,
@@ -4985,36 +5138,25 @@ out center tags 120;`;
 async function fetchSimilarViaNominatim(hotel) {
     const loc = hotel.city || hotel.region || addressInput.value.trim();
     if (!loc) return [];
-    const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({
+    const params = new URLSearchParams({
         q: `гостиница ${loc}`,
         countrycodes: 'ru',
         format: 'json',
         limit: '15',
-        addressdetails: '1'
+        addressdetails: '1',
+        extratags: '1',
+        'accept-language': 'ru'
     });
+    const viewbox = await nominatimCityViewbox(hotel.city || loc);
+    if (viewbox) {
+        params.set('viewbox', viewbox);
+        params.set('bounded', '1');
+    }
     try {
-        const data = await fetchNominatimJson(url, 10000);
+        const data = await fetchNominatimJson('https://nominatim.openstreetmap.org/search?' + params, 10000);
         if (!Array.isArray(data)) return [];
-        return (data || []).map(p => {
-            const loc2 = locationFromNominatim(p);
-            return {
-                name: p.display_name.split(',')[0] || 'Без названия',
-                address: p.display_name,
-                type: p.type || p.class || 'hotel',
-                phone: 'не указан',
-                site: '',
-                stars: '',
-                rooms: 'не указано',
-                osm_id: p.osm_id,
-                osm_type: p.osm_type,
-                lat: p.lat,
-                lon: p.lon,
-                city: loc2.city || loc,
-                region: loc2.region || hotel.region || '',
-                tags: {},
-                display_name: p.display_name
-            };
-        });
+        return (data || []).map(p => hotelFromNominatimPlace(p, { city: hotel.city || loc, query: loc }))
+            .filter(h => h.name && (!hotel.city || hotelMatchesCity(h, hotel.city)));
     } catch { return []; }
 }
 
@@ -5035,7 +5177,9 @@ function pickSimilarHotels(current, candidates, topN = 3) {
         const hRegion = normText(h.region);
         const sameCity = currentCity && hCity && (hCity === currentCity || hCity.includes(currentCity) || currentCity.includes(hCity));
         const sameRegion = currentRegion && hRegion && (hRegion === currentRegion || hRegion.includes(currentRegion) || currentRegion.includes(hRegion));
-        if (!sameCity && !sameRegion && d > 35) return;
+        if (currentCity) {
+            if (!sameCity && !hotelMatchesCity(h, current.city)) return;
+        } else if (!sameCity && !sameRegion && d > 35) return;
         if (!sameCity && !sameRegion && !currentCity && d > 20) return;
         h._sameCity = !!sameCity;
         seen.add(n);
