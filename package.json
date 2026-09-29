@@ -1,0 +1,10 @@
+{
+  "name": "gostinitsa",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Static HTML hotel analyst",
+  "scripts": {
+    "build": "sh ./render-build.sh",
+    "start": "node serve-static.js"
+  }
+}

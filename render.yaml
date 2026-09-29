@@ -6,6 +6,7 @@ services:
     branch: main
     buildCommand: sh ./render-build.sh
     staticPublishPath: .
+    autoDeploy: true
     envVars:
       - key: SKIP_INSTALL_DEPS
         value: "true"
