@@ -652,6 +652,39 @@
             box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18);
             border-left-width: 8px;
         }
+        .result-card.analog-card { border-left-width: 4px; padding: 14px 18px; }
+        .result-card > summary.hotel-card-summary {
+            list-style: none;
+            cursor: pointer;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 14px;
+        }
+        .result-card > summary.hotel-card-summary::-webkit-details-marker { display: none; }
+        .result-card > summary.hotel-card-summary::marker { content: ''; }
+        .hotel-card-preview { color: var(--text-muted); font-size: 0.92em; flex: 1; min-width: 160px; }
+        .hotel-card-chevron {
+            margin-left: auto;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .result-card:not([open]) { padding-top: 12px; padding-bottom: 12px; }
+        .result-card[open] .hotel-card-chevron { color: var(--text-muted); }
+        .search-to-prices-hint {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 12px 0;
+            color: var(--text-secondary);
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+        }
         .result-card .actions .select-hotel-btn[disabled] { opacity: 0.75; cursor: default; }
 
         .report-actions {
@@ -5231,8 +5264,10 @@ async function searchOnline() {
         } catch (err) {
             if (runId !== searchOnline.runId) return;
             if (searchPriceSection) {
-                searchPriceSection.innerHTML = `<div class="search-prices-heading">📊 Стоимость и категории номеров</div>
-                    <div class="error">Не удалось загрузить категории и цены: ${escapeHtml(err.message || String(err))}. Проверьте интернет и повторите поиск.</div>`;
+                searchPriceSection.innerHTML = `<div class="search-to-prices-hint">Не удалось загрузить категории и цены: ${escapeHtml(err.message || String(err))}.
+                    <button type="button" class="btn go-prices-btn">Открыть вкладку «Цены»</button></div>`;
+                const go = searchPriceSection.querySelector('.go-prices-btn');
+                if (go) go.addEventListener('click', () => showStep(1));
             }
         }
     } catch (e) {
@@ -5498,8 +5533,10 @@ async function selectFoundHotel(index, opts) {
         await enrichSearchWithAnalogsAndPrices(list, selectedHotel);
     } catch (err) {
         if (searchPriceSection) {
-            searchPriceSection.innerHTML = `<div class="search-prices-heading">📊 Стоимость и категории номеров</div>
-                <div class="error">Не удалось загрузить категории и цены: ${escapeHtml(err.message || String(err))}.</div>`;
+            searchPriceSection.innerHTML = `<div class="search-to-prices-hint">Не удалось загрузить категории и цены: ${escapeHtml(err.message || String(err))}. Откройте вкладку «Цены» или повторите поиск.
+                <button type="button" class="btn go-prices-btn">Открыть вкладку «Цены»</button></div>`;
+            const go = searchPriceSection.querySelector('.go-prices-btn');
+            if (go) go.addEventListener('click', () => showStep(1));
         }
     }
     if (opts.goToPrices) showStep(1);
@@ -5515,8 +5552,7 @@ async function enrichSearchWithAnalogsAndPrices(results, chosen) {
     selectedHotelIndex = foundIdx >= 0 ? foundIdx : 0;
     updatePriceHotelSelect();
     if (searchPriceSection) {
-        searchPriceSection.innerHTML = `<div class="search-prices-heading">📊 Стоимость и категории номеров — ${escapeHtml(primary.name)}</div>
-            <div style="padding:12px;"><span class="loader"></span> Подбираем категории и стоимость...</div>`;
+        searchPriceSection.innerHTML = `<div class="search-to-prices-hint"><span class="loader"></span> Загружаем категории и цены на вкладку «Цены» — ${escapeHtml(primary.name)}…</div>`;
     }
     if (analogsSection) {
         const place = [primary.city, primary.region].filter(Boolean).join(', ') || 'том же городе / области';
@@ -5535,15 +5571,13 @@ async function enrichSearchWithAnalogsAndPrices(results, chosen) {
     summary.source = bundle.source;
     await showPriceTableForHotel(primary, { bundle });
     if (searchPriceSection) {
-        if (bundle.empty) {
-            searchPriceSection.innerHTML = `<div class="search-prices-heading">📊 Стоимость и категории номеров — ${escapeHtml(primary.name)}</div>
-                <div class="error">Не найдены опубликованные категории номеров, их количество и стоимость. Оценочные шаблоны не показываются.</div>`;
-        } else {
-            searchPriceSection.innerHTML = `<div class="search-prices-heading">📊 Стоимость и категории номеров — ${escapeHtml(primary.name)}</div>
-                <div class="analog-meta">Только реестр и опубликованный тариф. Источник: ${escapeHtml(bundle.source || 'открытые данные')}. Номеров: ${summary.totalRooms || '—'}.${bundle.pageUrl ? ' <a href="' + escapeHtml(bundle.pageUrl) + '" target="_blank">карточка источника</a>' : ''}</div>
-                ${renderAvgCards(summary)}
-                ${renderCompactPriceTable(summary)}`;
-        }
+        const msg = bundle.empty
+            ? `Категории и цены для <strong>${escapeHtml(primary.name)}</strong> не найдены. Подробности — на вкладке «Цены».`
+            : `Категории номеров и стоимость по объекту <strong>${escapeHtml(primary.name)}</strong> выводятся на вкладке «Цены».`;
+        searchPriceSection.innerHTML = `<div class="search-to-prices-hint">${msg}
+            <button type="button" class="btn go-prices-btn">Открыть вкладку «Цены»</button></div>`;
+        const go = searchPriceSection.querySelector('.go-prices-btn');
+        if (go) go.addEventListener('click', () => showStep(1));
     }
 
     let similar = [];
@@ -5584,31 +5618,9 @@ async function enrichSearchWithAnalogsAndPrices(results, chosen) {
             isMain: false
         }))
     );
-    let html = `<div class="analogs-heading">🏨 Аналогичные объекты по звёздности (${escapeHtml(primary.city || primary.region || 'регион')})</div>`;
-    similar.forEach((h, i) => {
-        const st = hotelStars(h);
-        const starsDisplay = st ? '⭐ '.repeat(st) : 'не указана';
-        const siteHtml = h.site && !missingContact(h.site) && !looksLikeJunkSite(h.site) ? `<a href="${escapeHtml(formatSite(h.site))}" target="_blank">${escapeHtml(formatSite(h.site))}</a>` : 'не указан';
-        const dist = h._distanceKm != null ? `${h._distanceKm.toFixed(1)} км` : '—';
-        const model = comparisonRows[i + 1].summary;
-        html += `<div class="result-card">
-            <div class="row"><span class="label">Аналог ${i + 1}</span><span class="value"><strong>${escapeHtml(h.name)}</strong></span></div>
-            <div class="row"><span class="label">📍 Адрес</span><span class="value">${escapeHtml(h.address)}</span></div>
-            <div class="row"><span class="label">🌆 Город / область</span><span class="value">${escapeHtml([h.city, h.region].filter(Boolean).join(', ') || '—')}</span></div>
-            <div class="row"><span class="label">⭐ Категория</span><span class="value">${starsDisplay}</span></div>
-            <div class="row"><span class="label">🛏️ Номеров</span><span class="value">${model.totalRooms || (!missingContact(h.rooms) ? escapeHtml(String(h.rooms)) : '—')}</span></div>
-            <div class="row"><span class="label">🏷️ Тип</span><span class="value">${escapeHtml(h.type)}</span></div>
-            <div class="row"><span class="label">🌐 Сайт</span><span class="value">${siteHtml}</span></div>
-            <div class="row"><span class="label">📞 Телефон</span><span class="value">${missingContact(h.phone) ? 'не указан' : escapeHtml(formatPhone(h.phone))}</span></div>
-            <div class="row"><span class="label">📏 Расстояние</span><span class="value">${dist}</span></div>
-            <div class="analog-meta">Источник: ${escapeHtml(model.source || analogBundles[i].source || 'открытые данные')}</div>
-            ${analogBundles[i].empty ? '<div class="error">Опубликованные категории и цены не найдены.</div>' : (renderAvgCards(model) + renderCompactPriceTable(model))}
-            <div class="actions">
-                <button class="btn-outline-light analog-price-btn" data-analog-index="${i}">📊 Открыть во вкладке «Цены»</button>
-            </div>
-        </div>`;
-    });
-    html += `<div class="search-prices-heading">📋 Сравнение найденного объекта и аналогов</div>
+    let html = `<div class="analogs-heading">🏨 Аналогичные объекты по звёздности (${escapeHtml(primary.city || primary.region || 'регион')})</div>
+        <div class="search-prices-heading">📋 Сравнение найденного объекта и аналогов</div>
+        <p class="analog-meta">Цены и категории аналогов — в таблице. Подробный прайс выбранного объекта — на вкладке «Цены».</p>
         <table class="compact-price-table">
             <thead><tr>
                 <th>Объект</th><th>Город / область</th><th>Номеров</th><th>Категорий</th>
@@ -5628,6 +5640,23 @@ async function enrichSearchWithAnalogsAndPrices(results, chosen) {
         </tr>`;
     });
     html += `</tbody></table>`;
+    similar.forEach((h, i) => {
+        const st = hotelStars(h);
+        const starsDisplay = st ? '⭐ '.repeat(st) : 'не указана';
+        const siteHtml = h.site && !missingContact(h.site) && !looksLikeJunkSite(h.site) ? `<a href="${escapeHtml(formatSite(h.site))}" target="_blank">${escapeHtml(formatSite(h.site))}</a>` : 'не указан';
+        const dist = h._distanceKm != null ? `${h._distanceKm.toFixed(1)} км` : '—';
+        html += `<div class="result-card analog-card">
+            <div class="row"><span class="label">Аналог ${i + 1}</span><span class="value"><strong>${escapeHtml(h.name)}</strong></span></div>
+            <div class="row"><span class="label">📍 Адрес</span><span class="value">${escapeHtml(h.address)}</span></div>
+            <div class="row"><span class="label">🌆 Город / область</span><span class="value">${escapeHtml([h.city, h.region].filter(Boolean).join(', ') || '—')}</span></div>
+            <div class="row"><span class="label">⭐ Звёздность</span><span class="value">${starsDisplay}</span></div>
+            <div class="row"><span class="label">📏 Расстояние</span><span class="value">${dist}</span></div>
+            <div class="row"><span class="label">🌐 Сайт</span><span class="value">${siteHtml}</span></div>
+            <div class="actions">
+                <button type="button" class="btn-outline-light analog-price-btn" data-analog-index="${i}">📊 Открыть во вкладке «Цены»</button>
+            </div>
+        </div>`;
+    });
     analogsSection.innerHTML = html;
     analogsSection.querySelectorAll('.analog-price-btn').forEach(btn => {
         btn.addEventListener('click', function() {
@@ -5673,7 +5702,7 @@ function renderHotels(hotels) {
     let html = '';
     if (hotels.length > 1) {
         const selName = hotels[selectedHotelIndex] && hotels[selectedHotelIndex].name ? hotels[selectedHotelIndex].name : 'объект';
-        html += `<div class="hotel-pick-banner">Найдено ${hotels.length} объектов. Выберите нужную гостиницу кнопкой «Выбрать этот объект» — для неё загрузятся цены и аналоги. Сейчас выбрана: <strong>${escapeHtml(selName)}</strong>.</div>`;
+        html += `<div class="hotel-pick-banner">Найдено ${hotels.length} объектов. Выбранный показан ниже, остальные свёрнуты — нажмите строку, чтобы развернуть. Категории и цены открываются на вкладке «Цены». Сейчас выбрана: <strong>${escapeHtml(selName)}</strong>.</div>`;
     }
     hotels.forEach((h, index) => {
         const isSelected = index === selectedHotelIndex;
@@ -5686,12 +5715,18 @@ function renderHotels(hotels) {
         const siteHtml = h.site && !missingContact(h.site) && !looksLikeJunkSite(h.site) ? `<a href="${escapeHtml(formatSite(h.site))}" target="_blank">${escapeHtml(formatSite(h.site))}</a>` : 'не указан';
         const phoneText = missingContact(h.phone) ? 'не указан' : escapeHtml(formatPhone(h.phone));
         const roomsText = missingContact(h.rooms) ? 'не указано' : escapeHtml(String(h.rooms));
+        const preview = [h.city || h.region, hotelStars(h) ? ('★'.repeat(hotelStars(h))) : '', h.type].filter(Boolean).join(' · ');
         html += `
-            <div class="result-card${isSelected ? ' selected-hotel' : ''}" data-hotel-index="${index}">
-                <div class="hotel-card-title">
-                    <strong>${escapeHtml(h.name || ('Объект ' + (index + 1)))}</strong>
-                    ${isSelected ? '<span class="badge">Выбран</span>' : ''}
-                </div>
+            <details class="result-card${isSelected ? ' selected-hotel' : ''}" data-hotel-index="${index}"${isSelected ? ' open' : ''}>
+                <summary class="hotel-card-summary">
+                    <span class="hotel-card-title" style="margin:0;">
+                        <strong>${escapeHtml(h.name || ('Объект ' + (index + 1)))}</strong>
+                        ${isSelected ? '<span class="badge">Выбран</span>' : ''}
+                    </span>
+                    <span class="hotel-card-preview">${escapeHtml(preview || h.address || '')}</span>
+                    <span class="hotel-card-chevron">${isSelected ? 'Свернуть' : 'Развернуть'}</span>
+                </summary>
+                <div class="hotel-card-body">
                 <div class="row"><span class="label">📍 Адрес</span><span class="value">${escapeHtml(h.address)}</span></div>
                 <div class="row"><span class="label">🌆 Город / область</span><span class="value">${escapeHtml([h.city, h.region].filter(Boolean).join(', ') || '—')}</span></div>
                 <div class="row"><span class="label">🌐 Сайт</span><span class="value">${siteHtml}</span></div>
@@ -5720,10 +5755,11 @@ function renderHotels(hotels) {
                     <a href="https://www.tutu.ru/hotels/poisk/?q=${encodeURIComponent(h.name + ' ' + h.address)}" target="_blank">🏨 Tutu.ru</a>
                     <a href="https://sutochno.ru/poisk?q=${encodeURIComponent(h.name + ' ' + h.address)}" target="_blank">🏨 Sutochno.ru</a>
                     <a href="https://ostrovok.ru/hotels/?q=${encodeURIComponent(h.name + ' ' + h.address)}" target="_blank">🏨 Ostrovok.ru</a>
-                    <button class="btn btn-info btn-sm similar-btn" data-hotel-index="${index}">🔍 Подобрать аналоги</button>
+                    <button type="button" class="btn btn-info btn-sm similar-btn" data-hotel-index="${index}">🔍 Подобрать аналоги</button>
                 </div>
                 <div class="similar-block" id="similar-${index}" style="display:none; margin-top:12px;"></div>
-            </div>
+                </div>
+            </details>
         `;
     });
     hotelResults.innerHTML = html;
@@ -5741,6 +5777,12 @@ function renderHotels(hotels) {
             if (Number.isNaN(index) || index === selectedHotelIndex) return;
             selectFoundHotel(index);
         });
+    });
+    hotelResults.querySelectorAll('details.result-card').forEach(card => {
+        const chev = card.querySelector('.hotel-card-chevron');
+        const sync = () => { if (chev) chev.textContent = card.open ? 'Свернуть' : 'Развернуть'; };
+        sync();
+        card.addEventListener('toggle', sync);
     });
     document.querySelectorAll('.similar-btn').forEach(btn => {
         btn.addEventListener('click', async function() {
