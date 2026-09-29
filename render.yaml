@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: gostinitsa
+    runtime: static
+    repo: https://github.com/o31233424-del/-
+    branch: main
+    buildCommand: sh ./render-build.sh
+    staticPublishPath: .
+    envVars:
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+    routes:
+      - type: rewrite
+        source: /
+        destination: /index.html

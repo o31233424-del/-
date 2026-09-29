@@ -1,0 +1,13 @@
+---
+description: После правок сразу обновлять GitHub и Render
+alwaysApply: true
+---
+
+# GitHub и Render
+
+Любые изменения этого проекта сразу отражать на GitHub и Render. Не оставлять правки только локально.
+
+1. Коммитить затронутые файлы (без архива `.rar` и Excel-копий) и пушить в `origin` `main`: `https://github.com/o31233424-del/-.git`.
+2. Не менять git config. Если нет identity — `git -c user.name=o31233424-del -c user.email=o31233424-del@users.noreply.github.com`.
+3. Render — статический сайт из `render.yaml`. Пуш в `main` запускает деплой. Если деплой не стартовал — проверить сервис в dashboard Render.
+4. Точка входа на Render — `index.html`. Его собирает `render-build.sh` из `гостиница1.html`; не разъезжать эти файлы.
