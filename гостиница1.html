@@ -1933,12 +1933,15 @@ function locationFromNominatim(place) {
 function hotelMatchesCity(hotel, city) {
     const want = foldAddr(city);
     if (!want || want.length < 3) return true;
-    const blob = foldAddr([hotel?.city, hotel?.region, hotel?.address, hotel?.display_name, hotel?.name].filter(Boolean).join(' '));
+    const parts = [hotel?.city, hotel?.region, hotel?.address, hotel?.display_name, hotel?.name].filter(Boolean).join(' ');
+    const blob = foldAddr(parts);
     if (!blob) return false;
     if (blob.includes(want)) return true;
-    const slug = translitSlug(city).replace(/_/g, '');
-    if (slug.length >= 4 && blob.includes(foldAddr(slug))) return true;
+    const wantLat = translitSlug(city).replace(/_/g, '');
+    const blobLat = translitSlug(parts).replace(/_/g, '');
+    if (wantLat.length >= 4 && blobLat.includes(wantLat)) return true;
     if (want.length >= 6 && blob.includes(want.slice(0, want.length - 1))) return true;
+    if (wantLat.length >= 6 && blobLat.includes(wantLat.slice(0, 6))) return true;
     return false;
 }
 function ostrovokHitMatchesCity(h, city) {
@@ -5175,13 +5178,14 @@ function pickSimilarHotels(current, candidates, topN = 3) {
         if (d < 0.05) return;
         const hCity = normText(h.city);
         const hRegion = normText(h.region);
-        const sameCity = currentCity && hCity && (hCity === currentCity || hCity.includes(currentCity) || currentCity.includes(hCity));
+        const sameCity = currentCity && (hCity === currentCity || hCity.includes(currentCity) || currentCity.includes(hCity) || hotelMatchesCity(h, current.city));
         const sameRegion = currentRegion && hRegion && (hRegion === currentRegion || hRegion.includes(currentRegion) || currentRegion.includes(hRegion));
+        const near = Number.isFinite(d) && d <= 18;
         if (currentCity) {
-            if (!sameCity && !hotelMatchesCity(h, current.city)) return;
+            if (!sameCity && !near) return;
         } else if (!sameCity && !sameRegion && d > 35) return;
         if (!sameCity && !sameRegion && !currentCity && d > 20) return;
-        h._sameCity = !!sameCity;
+        h._sameCity = !!(sameCity || near);
         seen.add(n);
         unique.push(h);
     });
@@ -5201,7 +5205,6 @@ async function findSimilarHotelsNearby(currentHotel, topN = 3) {
     let candidates = await fetchNearbyHotelsOverpass(currentHotel);
     let picked = pickSimilarHotels(currentHotel, candidates, topN);
     if (picked.length < topN) {
-        await new Promise(r => setTimeout(r, 1100));
         const extra = await fetchSimilarViaNominatim(currentHotel);
         candidates = candidates.concat(extra, allSearchResults);
         picked = pickSimilarHotels(currentHotel, candidates, topN);
@@ -5298,6 +5301,7 @@ async function enrichSearchWithAnalogsAndPrices(results, chosen) {
             <div style="padding:12px;"><span class="loader"></span> Ищем 3 похожих объекта...</div>`;
     }
 
+    const similarPromise = settleWithTimeout(findSimilarHotelsNearby(primary, 3).catch(() => []), 28000, []);
     const bundle = await resolvePriceBundle(primary);
     if (runId !== enrichRunId) return;
     if (!bundle.empty) savePriceBundle(primary, bundle);
@@ -5321,7 +5325,7 @@ async function enrichSearchWithAnalogsAndPrices(results, chosen) {
 
     let similar = [];
     try {
-        similar = await settleWithTimeout(findSimilarHotelsNearby(primary, 3).catch(() => []), 12000, []);
+        similar = await similarPromise;
         if (!similar.length) similar = pickSimilarHotels(primary, list, 3);
     } catch (e) {
         similar = pickSimilarHotels(primary, list, 3);
