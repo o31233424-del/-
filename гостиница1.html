@@ -6,6 +6,8 @@
     <title>Гостиничный аналитик — мастер</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
@@ -136,6 +138,60 @@
             font-family: Impact, "Arial Black", "Segoe UI", sans-serif;
             font-weight: 800;
             letter-spacing: 0.08em;
+        }
+        .search-with-map {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 40%);
+            gap: 18px;
+            align-items: start;
+            margin-bottom: 8px;
+        }
+        .search-map-panel {
+            position: sticky;
+            top: 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            min-height: 320px;
+        }
+        .search-map-title {
+            font-weight: 600;
+            font-size: 14px;
+            padding: 10px 12px 8px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .search-map-frame-wrap {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            background: var(--bg-input);
+        }
+        #searchHotelMap {
+            width: 100%;
+            height: 100%;
+            display: block;
+            background: var(--bg-input);
+        }
+        .search-map-caption {
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 8px 12px 4px;
+            line-height: 1.35;
+        }
+        .search-map-link {
+            display: inline-block;
+            font-size: 12px;
+            padding: 0 12px 10px;
+            color: var(--accent);
+            text-decoration: none;
+        }
+        .search-map-link:hover { text-decoration: underline; }
+        @media (max-width: 900px) {
+            .search-with-map { grid-template-columns: 1fr; }
+            .search-map-panel { position: static; }
+            .search-map-frame-wrap { height: 280px; }
         }
         .sub {
             color: var(--text-secondary);
@@ -854,6 +910,8 @@
 
     <!-- ШАГ 1: ПОИСК ОТЕЛЯ -->
     <div class="step-content active" data-step="0">
+        <div class="search-with-map">
+            <div class="search-panel">
         <form id="hotelSearchForm" autocomplete="on">
         <div class="form-row">
             <label for="hotelInput">Название</label>
@@ -887,6 +945,16 @@
             Файл можно открывать напрямую в браузере. Для поиска объектов, номеров и цен нужен интернет.
         </div>
         <div id="searchStatus" class="status-text"></div>
+            </div>
+            <aside class="search-map-panel">
+                <div class="search-map-title">Карта расположения — 2ГИС</div>
+                <div class="search-map-frame-wrap">
+                    <div id="searchHotelMap"></div>
+                </div>
+                <div id="searchMapCaption" class="search-map-caption">После поиска здесь отметится выбранный объект</div>
+                <a id="searchMap2gisLink" class="search-map-link" href="https://2gis.ru/" target="_blank" rel="noopener">Открыть в 2ГИС</a>
+            </aside>
+        </div>
         <div id="hotelResults"></div>
         <div id="searchPriceSection"></div>
         <div id="analogsSection"></div>
@@ -1730,6 +1798,9 @@ function showStep(index) {
     });
     currentStep = index;
     localStorage.setItem('currentStep', index);
+    if (index === 0 && typeof gisMap !== 'undefined' && gisMap) {
+        setTimeout(() => { try { gisMap.invalidateSize(); } catch {} }, 80);
+    }
     if (index === 3) {
         if (typeof initMdpForm === 'function') { try { initMdpForm(); } catch (e) {} }
     }
@@ -1828,6 +1899,107 @@ let selectedHotel = null;
 let enrichRunId = 0;
 const analogsSection = document.getElementById('analogsSection');
 const searchPriceSection = document.getElementById('searchPriceSection');
+const searchMapCaption = document.getElementById('searchMapCaption');
+const searchMapLink = document.getElementById('searchMap2gisLink');
+const GIS_HOME = { lat: 55.751244, lon: 37.618423, zoom: 4 };
+let gisMap = null;
+let gisMarker = null;
+
+function twoGisOpenUrl(hotel, pt) {
+    if (pt && Number.isFinite(Number(pt.lat)) && Number.isFinite(Number(pt.lon))) {
+        return 'https://2gis.ru/geo/' + encodeURIComponent(Number(pt.lon) + ',' + Number(pt.lat));
+    }
+    const q = [hotel?.name, hotel?._street, hotel?.city].filter(Boolean).join(' ') || hotel?.address || 'Россия';
+    return 'https://2gis.ru/search/' + encodeURIComponent(q);
+}
+function setSearchMapCaption(text) {
+    if (searchMapCaption) searchMapCaption.textContent = text || '';
+}
+function ensureGisMap() {
+    const el = document.getElementById('searchHotelMap');
+    if (!el || typeof L === 'undefined') return null;
+    if (gisMap) return gisMap;
+    gisMap = L.map(el, { scrollWheelZoom: true, zoomControl: true, attributionControl: true });
+    L.tileLayer('https://tile{s}.maps.2gis.com/tiles?x={x}&y={y}&z={z}', {
+        subdomains: '0123',
+        maxZoom: 18,
+        attribution: '<a href="https://2gis.ru/" target="_blank" rel="noopener">2ГИС</a>'
+    }).addTo(gisMap);
+    gisMap.setView([GIS_HOME.lat, GIS_HOME.lon], GIS_HOME.zoom);
+    setTimeout(() => { try { gisMap.invalidateSize(); } catch {} }, 80);
+    return gisMap;
+}
+function resetSearchMap() {
+    setSearchMapCaption('После поиска здесь отметится выбранный объект');
+    if (searchMapLink) searchMapLink.href = 'https://2gis.ru/';
+    const map = ensureGisMap();
+    if (!map) return;
+    if (gisMarker) {
+        map.removeLayer(gisMarker);
+        gisMarker = null;
+    }
+    map.setView([GIS_HOME.lat, GIS_HOME.lon], GIS_HOME.zoom);
+    setTimeout(() => { try { map.invalidateSize(); } catch {} }, 50);
+}
+function pickHotelLatLon(hotel) {
+    const o = hotel?._ostrovok || {};
+    const loc = o.location || o.coordinates || {};
+    const lat = parseFloat(hotel?.lat || o.latitude || o.lat || loc.latitude || loc.lat);
+    const lon = parseFloat(hotel?.lon || o.longitude || o.lon || loc.longitude || loc.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && !(lat === 0 && lon === 0)) return { lat, lon };
+    return null;
+}
+async function geocodeHotelPoint(hotel) {
+    const have = pickHotelLatLon(hotel);
+    if (have) return have;
+    const q = [hotel?.name, hotel?._street, hotel?.address, hotel?.city].filter(Boolean).join(', ');
+    if (!q) return null;
+    try {
+        const params = new URLSearchParams({
+            q,
+            countrycodes: 'ru',
+            format: 'json',
+            limit: '1',
+            'accept-language': 'ru'
+        });
+        const data = await fetchNominatimJson('https://nominatim.openstreetmap.org/search?' + params, 8000);
+        const p = Array.isArray(data) ? data[0] : null;
+        const lat = parseFloat(p?.lat);
+        const lon = parseFloat(p?.lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            hotel.lat = lat;
+            hotel.lon = lon;
+            return { lat, lon };
+        }
+    } catch {}
+    return null;
+}
+async function showHotelOnMap(hotel) {
+    if (!hotel) return;
+    setSearchMapCaption('Определяем координаты…');
+    try {
+        const map = ensureGisMap();
+        const pt = await geocodeHotelPoint(hotel);
+        if (!map || !pt) {
+            setSearchMapCaption('Координаты не найдены — можно открыть 2ГИС по названию');
+            if (searchMapLink) searchMapLink.href = twoGisOpenUrl(hotel, null);
+            return;
+        }
+        if (gisMarker) map.removeLayer(gisMarker);
+        gisMarker = L.marker([pt.lat, pt.lon]).addTo(map);
+        const popup = [hotel.name, hotel.address || [hotel._street, hotel.city].filter(Boolean).join(', ')].filter(Boolean).join('<br>');
+        gisMarker.bindPopup(popup).openPopup();
+        map.setView([pt.lat, pt.lon], 16);
+        if (searchMapLink) searchMapLink.href = twoGisOpenUrl(hotel, pt);
+        const where = hotel.address || [hotel._street, hotel.city].filter(Boolean).join(', ') || '';
+        setSearchMapCaption((hotel.name || 'Объект') + (where ? ' — ' + where : ''));
+        setTimeout(() => { try { map.invalidateSize(); } catch {} }, 80);
+    } catch {
+        setSearchMapCaption('Не удалось открыть карту 2ГИС');
+        if (searchMapLink) searchMapLink.href = twoGisOpenUrl(hotel, pickHotelLatLon(hotel));
+    }
+}
+resetSearchMap();
 const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 const RACK_COEFF = 0.8;
 const VAT_RATE = 1.22;
@@ -3251,8 +3423,8 @@ function hotelFromOstrovokHit(h) {
         rooms: 'не указано',
         osm_id: '',
         osm_type: '',
-        lat: '',
-        lon: '',
+        lat: h.latitude || h.lat || (h.location && (h.location.latitude || h.location.lat)) || '',
+        lon: h.longitude || h.lon || (h.location && (h.location.longitude || h.location.lon)) || '',
         city: h.region_name || '',
         region: '',
         display_name: [h.hotel_name, h.hotel_address, h.region_name].filter(Boolean).join(', '),
@@ -5081,6 +5253,10 @@ async function searchOnline() {
                 if (isWeakHotelName(dup.name)) dup.name = oh.name;
                 dup._ostrovok = oh._ostrovok;
                 if (!dup.city) dup.city = oh.city;
+                if (!pickHotelLatLon(dup) && pickHotelLatLon(oh)) {
+                    dup.lat = oh.lat;
+                    dup.lon = oh.lon;
+                }
             } else if (!city || hotelMatchesCity(oh, city)) {
                 results.push(oh);
             }
@@ -5119,6 +5295,7 @@ async function searchOnline() {
         if (!results.length) {
             hotelResults.innerHTML = `<div class="error">❌ Ничего не найдено.</div>`;
             searchStatus.textContent = 'Результатов: 0';
+            resetSearchMap();
             allSearchResults = [];
             selectedHotel = null;
             selectedHotelIndex = 0;
@@ -5147,6 +5324,7 @@ async function searchOnline() {
     } catch (e) {
         hotelResults.innerHTML = `<div class="error">⚠️ Ошибка: ${e.message}</div>`;
         searchStatus.textContent = '❌ Ошибка';
+        resetSearchMap();
         allSearchResults = [];
         selectedHotel = null;
         selectedHotelIndex = 0;
@@ -5566,6 +5744,7 @@ function renderHotels(hotels) {
         hotelResults.innerHTML = `<div class="error">❌ Ничего не найдено.</div>`;
         searchStatus.textContent = 'Результатов: 0';
         hotelResults.style.display = 'block';
+        resetSearchMap();
         updatePriceHotelSelect();
         return;
     }
@@ -5636,6 +5815,7 @@ function renderHotels(hotels) {
     });
     hotelResults.innerHTML = html;
     hotelResults.style.display = 'block';
+    showHotelOnMap(hotels[selectedHotelIndex] || selectedHotel);
     const sel = hotels[selectedHotelIndex];
     searchStatus.textContent = hotels.length > 1
         ? `Найдено: ${hotels.length}. Выбрана: ${sel && sel.name ? sel.name : '—'}`
@@ -5701,6 +5881,7 @@ clearBtn.addEventListener('click', () => {
     updatePriceHotelSelect();
     if (analogsSection) analogsSection.innerHTML = '';
     if (searchPriceSection) searchPriceSection.innerHTML = '';
+    resetSearchMap();
 });
 [hotelInput, addressInput, streetInput].forEach(el => {
     if (!el) return;
