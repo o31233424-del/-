@@ -1143,7 +1143,7 @@
                             <th>№ п/п</th>
                             <th>Объект оценки</th>
                             <th>Площадь, кв.м</th>
-                            <th>Рыночная стоимость, руб.</th>
+                            <th>Рыночная стоимость, руб. (с НДС)</th>
                             <th>Рыночная стоимость, руб./номер (с НДС)</th>
                             <th>Рыночная стоимость, руб./кв.м (с НДС)</th>
                             <th>Действие</th>
@@ -1154,15 +1154,20 @@
             </div>
 
             <div class="add-object-form">
+                <select id="objKind">
+                    <option value="realty">Недвижимость</option>
+                    <option value="land">Земельный участок</option>
+                </select>
                 <input type="text" id="objName" placeholder="Название объекта" value="Гостиница (кад.номер )">
-                <input type="number" id="objArea" placeholder="Площадь, кв.м" value="1311.2">
-                <input type="number" id="objValue" placeholder="Рыночная стоимость, руб." value="55359000">
+                <input type="number" id="objArea" placeholder="Площадь, кв.м" value="1311.2" step="0.1">
                 <input type="number" id="objRooms" placeholder="Кол-во номеров" value="39">
                 <button class="btn btn-success btn-sm" id="addObjectBtn">➕ Добавить объект</button>
             </div>
             <div class="total-note">
-                <strong>📌 Данные сохраняются автоматически.</strong> В колонке «Объект оценки» можно вручную указать название и кадастровый номер. Весовые коэффициенты влияют на итоговую стоимость.
-                Для доходного подхода доступен выбор детализации.
+                <strong>📌 Данные сохраняются автоматически.</strong> Вся рыночная стоимость на этой вкладке — с НДС 22%.
+                Стоимость земельного участка берётся с вкладки МДДП без НДС и здесь умножается на 1,22.
+                Стоимость объектов недвижимости распределяется пропорционально площади.
+                В колонке «Объект оценки» можно указать название и кадастровый номер. Весовые коэффициенты влияют на итоговую стоимость.
             </div>
         </div>
 
@@ -7225,8 +7230,7 @@ function computeMdp(params) {
     const improvValue = marketValue - landValue;
     const roomsSafe = p.rooms > 0 ? p.rooms : 1;
     const valuePerRoom = marketValue / roomsSafe;
-    const landVatK = p.landOwned === false ? 1.2 : 1;
-    const marketWithVat = Math.round(improvValue * 1.2) + Math.round(landValue * landVatK);
+    const marketWithVat = Math.round(improvValue * VAT_RATE) + Math.round(landValue * VAT_RATE);
     const valuePerRoomVat = marketWithVat / roomsSafe;
     const capRate = marketValue > 0 ? noi[1] / marketValue : 0;
 
@@ -7867,12 +7871,95 @@ function initReconciliation() {
         if (data.income_detail) sel.value = data.income_detail;
     }
     syncTotalTabRoomsFromMdp();
+    syncTotalTabValueFromMdp();
     recalcReconciliation();
 }
 
+function objectKind(obj) {
+    if (obj?.kind === 'land' || obj?.kind === 'realty' || obj?.kind === 'other') return obj.kind;
+    if (/земельн/i.test(String(obj?.name || ''))) return 'land';
+    if (Number(obj?.area) > 0) return 'realty';
+    return 'other';
+}
+
+function getMdpLandAndMarket() {
+    try {
+        const params = loadMdpParams();
+        const data = computeMdp(params);
+        const marketNet = Number(data.marketValue) || 0;
+        const landNet = Number(data.landValue) || 0;
+        return {
+            landNet,
+            marketNet,
+            landVat: Math.round(landNet * VAT_RATE),
+            marketVat: Number(data.marketWithVat) || Math.round(marketNet * VAT_RATE),
+            rooms: Number(params.rooms) || 0
+        };
+    } catch {
+        return { landNet: 0, marketNet: 0, landVat: 0, marketVat: 0, rooms: 0 };
+    }
+}
+
+function syncTotalTabValueFromMdp() {
+    const { marketVat } = getMdpLandAndMarket();
+    const incValue = document.querySelector('td[data-field="inc_value"]');
+    if (incValue && marketVat > 0) incValue.textContent = marketVat.toLocaleString('ru-RU');
+}
+
+function applyShareByArea(items, total) {
+    const withArea = items.filter(o => Number(o.area) > 0);
+    const base = withArea.length ? withArea : items;
+    const sumArea = base.reduce((s, o) => s + (Number(o.area) || 0), 0);
+    let assigned = 0;
+    if (sumArea > 0) {
+        base.forEach(o => {
+            o.value = Math.round(total * (Number(o.area) / sumArea));
+            assigned += o.value;
+        });
+    } else if (base.length) {
+        const each = Math.round(total / base.length);
+        base.forEach((o, i) => {
+            o.value = i === base.length - 1 ? total - assigned : each;
+            assigned += o.value;
+        });
+    }
+    const delta = total - assigned;
+    if (delta && base.length) {
+        const main = base.reduce((a, b) => (Number(a.area) >= Number(b.area) ? a : b));
+        main.value = (Number(main.value) || 0) + delta;
+    }
+}
+
+function applyObjectMarketValues(totalVat) {
+    const objects = loadObjects();
+    const { landVat } = getMdpLandAndMarket();
+    const pool = Math.max(0, Math.round(Number(totalVat) || 0));
+    const landShare = Math.min(Math.max(0, Number(landVat) || 0), pool);
+    const improvShare = Math.max(0, pool - landShare);
+
+    let landObjs = objects.filter(o => objectKind(o) === 'land');
+    if (!landObjs.length && landShare > 0) {
+        const maxId = objects.reduce((max, o) => Math.max(max, o.id || 0), 0);
+        const land = { id: maxId + 1, name: 'Земельный участок', area: 0, value: landShare, rooms: 0, kind: 'land' };
+        objects.push(land);
+        landObjs = [land];
+    }
+    landObjs.forEach(o => { o.kind = 'land'; });
+    applyShareByArea(landObjs, landShare);
+
+    const reObjs = objects.filter(o => objectKind(o) === 'realty');
+    reObjs.forEach(o => { o.kind = 'realty'; });
+    applyShareByArea(reObjs.filter(o => Number(o.area) > 0), improvShare);
+    objects.forEach(o => {
+        if (objectKind(o) === 'other') o.value = 0;
+        if (objectKind(o) === 'realty' && !(Number(o.area) > 0)) o.value = 0;
+    });
+    saveObjects(objects);
+}
+
 function recalcReconciliation() {
-    const incRooms = parseFloat(document.querySelector('td[data-field="inc_rooms"]').textContent) || 0;
-    const incValue = parseFloat(document.querySelector('td[data-field="inc_value"]').textContent.replace(/\s/g, '')) || 0;
+    const incRooms = parseFloat(String(document.querySelector('td[data-field="inc_rooms"]').textContent).replace(/\s/g, '').replace(',', '.')) || 0;
+    const incValue = parseFloat(String(document.querySelector('td[data-field="inc_value"]').textContent).replace(/[\s\u00a0]/g, '').replace(',', '.')) || 0;
     const incWeightStr = document.querySelector('td[data-field="inc_weight"]').textContent;
     const incWeight = parseFloat(incWeightStr.replace('%', '')) / 100 || 0;
 
@@ -7892,6 +7979,7 @@ function recalcReconciliation() {
         income_detail: document.getElementById('incomeDetailSelect').value
     };
     saveReconciliation(data);
+    applyObjectMarketValues(incMarket);
     updateObjectTable();
 }
 
@@ -7902,9 +7990,9 @@ function loadObjects() {
         try { return JSON.parse(saved); } catch {}
     }
     return [
-        { id: 1, name: 'Гостиница (кад.номер )', area: 1311.2, value: 55359000, rooms: 39 },
-        { id: 2, name: 'Земельный участок (кад.номер 61:28:0600013:1235)', area: 22300, value: 9258000, rooms: 0 },
-        { id: 3, name: 'Затраты на воссоздание оборудования', area: 0, value: 7907000, rooms: 0 }
+        { id: 1, name: 'Гостиница (кад.номер )', area: 1311.2, value: 0, rooms: 39, kind: 'realty' },
+        { id: 2, name: 'Земельный участок (кад.номер 61:28:0600013:1235)', area: 22300, value: 0, rooms: 0, kind: 'land' },
+        { id: 3, name: 'Затраты на воссоздание оборудования', area: 0, value: 0, rooms: 0, kind: 'other' }
     ];
 }
 function saveObjects(objects) {
@@ -7923,7 +8011,7 @@ function updateObjectTable() {
             <td>${idx+1}</td>
             <td class="editable-total obj-name-cell" contenteditable="true" data-obj-id="${obj.id}" data-field="name" title="Укажите название и кадастровый номер">${escapeHtml(obj.name || '')}</td>
             <td class="editable-total" contenteditable="true" data-obj-id="${obj.id}" data-field="area">${obj.area}</td>
-            <td class="editable-total" contenteditable="true" data-obj-id="${obj.id}" data-field="value">${Number(obj.value || 0).toLocaleString('ru-RU')}</td>
+            <td class="auto-calc-total">${Number(obj.value || 0).toLocaleString('ru-RU')}</td>
             <td class="auto-calc-total">${valuePerRoom.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
             <td class="auto-calc-total">${valuePerArea.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
             <td><button class="btn btn-danger btn-sm" data-obj-id="${obj.id}" onclick="deleteObject(${obj.id})">✖</button></td>
@@ -7947,9 +8035,7 @@ function updateObjectTable() {
             if (!obj) return;
             if (field === 'name') obj.name = value;
             else if (field === 'area') obj.area = parseFloat(value.replace(/\s/g, '').replace(',', '.')) || 0;
-            else if (field === 'value') obj.value = parseFloat(value.replace(/\s/g, '').replace(',', '.')) || 0;
             saveObjects(objects);
-            updateObjectTable();
             recalcReconciliation();
         });
     });
@@ -7966,18 +8052,20 @@ window.deleteObject = function(id) {
 
 document.getElementById('addObjectBtn').addEventListener('click', function() {
     const name = document.getElementById('objName').value.trim();
+    const kind = (document.getElementById('objKind') || {}).value || 'realty';
     const area = parseFloat(document.getElementById('objArea').value) || 0;
-    const value = parseFloat(document.getElementById('objValue').value.replace(/\s/g, '')) || 0;
     const rooms = parseInt(document.getElementById('objRooms').value) || 0;
     if (!name) { alert('Введите название объекта.'); return; }
+    if (kind === 'realty' && !(area > 0)) {
+        alert('Для объекта недвижимости укажите площадь — рыночная стоимость распределяется пропорционально площади.');
+        return;
+    }
     const objects = loadObjects();
     const maxId = objects.reduce((max, o) => Math.max(max, o.id), 0);
-    objects.push({ id: maxId + 1, name, area, value, rooms });
+    objects.push({ id: maxId + 1, name, area, value: 0, rooms, kind });
     saveObjects(objects);
-    updateObjectTable();
     document.getElementById('objName').value = '';
     document.getElementById('objArea').value = '';
-    document.getElementById('objValue').value = '';
     document.getElementById('objRooms').value = '';
     recalcReconciliation();
 });
@@ -8012,6 +8100,7 @@ function syncTotalTabRoomsFromMdp() {
 
 function updateTotalTab() {
     syncTotalTabRoomsFromMdp();
+    syncTotalTabValueFromMdp();
     recalcReconciliation();
 }
 
