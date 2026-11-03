@@ -582,6 +582,18 @@
         @media (max-width: 900px) {
             .ref-grid { grid-template-columns: 1fr; }
         }
+        .adr-ref-block { margin-top: 28px; }
+        .adr-ref-block h3 { color: var(--accent); margin: 0 0 10px; }
+        .adr-ref-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+        .adr-ref-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; margin: 12px 0 16px; }
+        @media (max-width: 900px) { .adr-ref-options { grid-template-columns: 1fr; } }
+        .adr-opt { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+        .adr-opt legend { color: var(--accent); font-weight: 600; padding: 0 6px; }
+        .adr-opt label { display: block; margin: 4px 0; cursor: pointer; font-size: 0.92em; }
+        .adr-source { font-size: 0.88em; color: #9ab; margin-bottom: 10px; }
+        .adr-ref-block details { margin-top: 16px; background: var(--bg-card); border-radius: 8px; padding: 10px 14px; }
+        .adr-ref-block summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+        .adr-method { white-space: pre-wrap; font-size: 0.86em; line-height: 1.45; color: #c8d4dc; margin: 10px 0 0; }
 
         .price-status, .revenue-status, .expense-status, .mdp-status, .input-status, .total-status, .ref-status {
             text-align: center;
@@ -1179,7 +1191,7 @@
 
     <!-- ШАГ 7: СПРАВОЧНАЯ ИНФОРМАЦИЯ -->
     <div class="step-content" data-step="6">
-        <div class="ref-status">📚 Среднерыночные ориентиры по доходам, расходам и марже</div>
+        <div class="ref-status">📚 Среднерыночные ориентиры и расчёт ADR по прайсу</div>
         <div class="ref-grid">
             <div>
                 <h3 style="color:var(--accent); margin-bottom:8px;">Средние рыночные данные по структуре доходов <br><span style="font-size:0.8em;">в % от общей выручки</span></h3>
@@ -1234,6 +1246,59 @@
         </div>
         <div class="revenue-note">
             <strong>📌 Источники:</strong> Среднерыночные данные и отчётность клиента.
+        </div>
+
+        <div class="adr-ref-block">
+            <h3>Расчёт ADR по прайсу (шаблон и методика С. Новожилова)</h3>
+            <p class="adr-source" id="adrSourceLabel">Загружен пример из шаблона. Можно подставить свой Excel или таблицу из Word.</p>
+            <div class="adr-ref-toolbar">
+                <label class="btn btn-outline" style="margin:0; cursor:pointer;">
+                    Загрузить таблицу (.xlsx / .xls / .csv)
+                    <input type="file" id="adrTemplateFile" accept=".xlsx,.xls,.csv,.ods" style="display:none;">
+                </label>
+                <button type="button" class="btn btn-outline" id="adrLoadSampleBtn">Вернуть пример из шаблона</button>
+                <button type="button" class="btn" id="adrDownloadTemplateBtn">Скачать шаблон Excel</button>
+                <button type="button" class="btn" id="adrRecalcBtn">Пересчитать ADR</button>
+            </div>
+            <div class="adr-ref-options">
+                <fieldset class="adr-opt">
+                    <legend>Класс гостиницы</legend>
+                    <label><input type="radio" name="adrStars" value="34" checked> 3–4*</label>
+                    <label><input type="radio" name="adrStars" value="5"> 5*</label>
+                </fieldset>
+                <fieldset class="adr-opt">
+                    <legend>Корректировка rack → ADR</legend>
+                    <label><input type="radio" name="adrCorr" value="yes" checked> Да (3–4* ×0,8; 5* ×0,75)</label>
+                    <label><input type="radio" name="adrCorr" value="no"> Нет (оставить rack)</label>
+                </fieldset>
+                <fieldset class="adr-opt">
+                    <legend>Единица цены в прайсе</legend>
+                    <label><input type="radio" name="adrUnit" value="room" checked> За номер</label>
+                    <label><input type="radio" name="adrUnit" value="person"> За человека (× занятость)</label>
+                </fieldset>
+                <fieldset class="adr-opt">
+                    <legend>НДС 22%</legend>
+                    <label><input type="radio" name="adrVat" value="none" checked> Не выделять</label>
+                    <label><input type="radio" name="adrVat" value="strip"> Выделить (÷1,22)</label>
+                </fieldset>
+            </div>
+            <div id="adrPreviewWrap" class="revenue-table-wrapper"></div>
+            <div id="adrMonthWrap" class="revenue-table-wrapper" style="margin-top:16px;"></div>
+            <div id="adrQuarterWrap" class="revenue-table-wrapper" style="margin-top:16px;"></div>
+            <details>
+                <summary>Методика (промпт)</summary>
+                <pre class="adr-method">Пользователь загружает таблицу (Excel или Word) с ценами «от стойки» (rack rates) по категориям номеров. В шапке — периоды действия цен (например 01.01–01.03). В строках — категория, число номеров, число человек (занятость), цены по периодам.
+
+Параметры расчёта:
+1) Класс 3–4* или 5*.
+2) Корректировка rack → ADR: да / нет. Если да: 3–4* умножить на 0,8; 5* на 0,75.
+3) Цена за номер или за человека. Если за человека — умножить цену на число человек в категории.
+4) НДС: не выделять или выделить (разделить на 1,22).
+
+Похожие категории объединять в одну (Стандарт, Комфорт, Люкс, Апартамент, Студия, Элит, Коттедж, Кампус и т.п.). При объединении — средневзвешенная цена по числу номеров.
+
+Сначала средневзвешенные цены по месяцам (если в месяце несколько периодов — среднее по числу дней), затем по кварталам (среднее месяцев, взвешенное по дням в месяце). Итог по гостинице — средневзвешенно по числу номеров категорий. Годовой ADR — среднее квартальных, взвешенное по числу дней в квартале.</pre>
+            </details>
         </div>
         <div class="wizard-nav">
             <button class="btn btn-outline btn-prev" data-prev="5">← Назад</button>
@@ -8531,8 +8596,258 @@ document.getElementById('exportExcelBtn').addEventListener('click', function() {
 });
 
 // ================================================================
-// 9. ИНИЦИАЛИЗАЦИЯ
+// СПРАВОЧНИК: ADR по шаблону С. Новожилова
 // ================================================================
+const ADR_MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const ADR_MONTH_NAMES = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const ADR_GROUP_KEYS = [
+    ['стандарт', 'Стандарт'], ['комфорт', 'Комфорт'], ['люкс', 'Люкс'],
+    ['апартамент', 'Апартамент'], ['студи', 'Студия'], ['элит', 'Элит'],
+    ['коттедж', 'Коттедж'], ['кампус', 'Кампус']
+];
+const ADR_TEMPLATE_PERIODS = ['01.01.-30.04.', '01.05.-20.06.', '21.06-25.08', '26.08.-14.10.', '15.10.-31.12.'];
+const ADR_TEMPLATE_ROWS = [
+    ['Стандарт однокомнатный двухместный (корпус № 1)', 53, 2, 4600, 5000, 6350, 5000, 4600],
+    ['Комфорт однокомнатный двухместный (корпус № 1)', 20, 2, 6600, 7200, 7800, 7200, 6600],
+    ['Комфорт двухкомнатный двухместный (корпус № 1)', 4, 2, 7450, 8050, 8800, 8050, 7450],
+    ['Стандарт однокомнатный двухместный (корпус № 2)', 19, 2, 3850, 4350, 5600, 4350, 3850],
+    ['Комфорт двухкомнатный двухместный (корпус № 2)', 1, 2, 6700, 7300, 8100, 7300, 6700],
+    ['Кампус однокомнатный трехместный (корпус № 2)', 7, 3, 2800, 3100, 3900, 3100, 2800]
+];
+
+let adrParsed = null;
+
+function adrFmt(n) {
+    if (n == null || !isFinite(n)) return '—';
+    return Math.round(n).toLocaleString('ru-RU');
+}
+function adrPeople(v) {
+    const m = String(v == null ? '' : v).match(/(\d+)/);
+    return m ? +m[1] : 1;
+}
+function adrGroupName(name) {
+    const n = String(name || '').toLowerCase();
+    for (const [k, lab] of ADR_GROUP_KEYS) if (n.includes(k)) return lab;
+    return String(name || '').split(/[(\[]/)[0].trim() || String(name || 'Категория');
+}
+function adrParsePeriod(str) {
+    const m = String(str || '').match(/(\d{1,2})\.(\d{1,2})\.?\s*[\-–—]\s*(\d{1,2})\.(\d{1,2})/);
+    if (!m) return null;
+    return { d1: +m[1], m1: +m[2], d2: +m[3], m2: +m[4] };
+}
+function adrCovers(p, month, day) {
+    const start = p.m1 * 100 + p.d1;
+    const end = p.m2 * 100 + p.d2;
+    const cur = (month + 1) * 100 + day;
+    if (start <= end) return cur >= start && cur <= end;
+    return cur >= start || cur <= end;
+}
+function adrCellNum(v) {
+    if (typeof v === 'number' && isFinite(v)) return v;
+    const s = String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.');
+    const n = parseFloat(s);
+    return isFinite(n) ? n : 0;
+}
+
+function buildAdrFromTemplate() {
+    return {
+        periods: ADR_TEMPLATE_PERIODS.map(label => ({ label, range: adrParsePeriod(label) })),
+        rows: ADR_TEMPLATE_ROWS.map(r => ({
+            name: r[0], rooms: r[1], people: r[2],
+            prices: r.slice(3).map(Number)
+        }))
+    };
+}
+
+function parseAdrAoa(aoa) {
+    if (!aoa || !aoa.length) throw new Error('Пустой файл');
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(aoa.length, 12); i++) {
+        const row = (aoa[i] || []).map(c => String(c || '').toLowerCase());
+        if (row.some(c => c.includes('категор'))) { headerIdx = i; break; }
+    }
+    if (headerIdx < 0) headerIdx = 0;
+    const h1 = aoa[headerIdx] || [];
+    const h2 = aoa[headerIdx + 1] || [];
+    let catCol = 0, roomCol = 1, pplCol = 2;
+    h1.forEach((c, i) => {
+        const t = String(c || '').toLowerCase();
+        if (t.includes('категор')) catCol = i;
+        if (t.includes('количество номер') || (t.includes('номер') && t.includes('кол'))) roomCol = i;
+        if (t.includes('человек') || t.includes('занят')) pplCol = i;
+    });
+    const periodCols = [];
+    const maxCols = Math.max(h1.length, h2.length);
+    for (let i = 0; i < maxCols; i++) {
+        if (i === catCol || i === roomCol || i === pplCol) continue;
+        const lab = String(h2[i] || h1[i] || '').trim();
+        const range = adrParsePeriod(lab) || adrParsePeriod(String(h1[i] || ''));
+        if (range || /^\d/.test(lab)) periodCols.push({ i, label: lab || ('Период ' + (periodCols.length + 1)), range });
+    }
+    if (!periodCols.length) {
+        for (let i = Math.max(catCol, roomCol, pplCol) + 1; i < maxCols; i++) {
+            const lab = String(h2[i] || h1[i] || '').trim();
+            periodCols.push({ i, label: lab || ('Период ' + (periodCols.length + 1)), range: adrParsePeriod(lab) });
+        }
+    }
+    const startRow = headerIdx + (h2.some(c => adrParsePeriod(c)) ? 2 : 1);
+    const rows = [];
+    for (let r = startRow; r < aoa.length; r++) {
+        const row = aoa[r] || [];
+        const name = String(row[catCol] || '').trim();
+        if (!name) continue;
+        const rooms = adrCellNum(row[roomCol]);
+        if (!rooms) continue;
+        rows.push({
+            name, rooms, people: adrPeople(row[pplCol]),
+            prices: periodCols.map(p => adrCellNum(row[p.i]))
+        });
+    }
+    if (!rows.length) throw new Error('Не найдены строки с категориями и числом номеров');
+    return {
+        periods: periodCols.map(p => ({ label: p.label, range: p.range })),
+        rows
+    };
+}
+
+function monthPriceForRow(row, periods, unitPerson) {
+    const prices = periods.map((p, i) => {
+        let v = Number(row.prices[i]) || 0;
+        if (unitPerson) v *= (row.people || 1);
+        return v;
+    });
+    const months = [];
+    for (let m = 0; m < 12; m++) {
+        let wSum = 0, dSum = 0;
+        const dim = ADR_MONTH_DAYS[m];
+        for (let d = 1; d <= dim; d++) {
+            let hit = -1;
+            periods.forEach((p, i) => {
+                if (p.range && adrCovers(p.range, m, d)) hit = i;
+            });
+            if (hit < 0 && periods.length === 1) hit = 0;
+            if (hit >= 0 && prices[hit]) { wSum += prices[hit]; dSum++; }
+        }
+        months.push(dSum ? wSum / dSum : 0);
+    }
+    return months;
+}
+
+function computeAdr(data) {
+    const stars = (document.querySelector('input[name="adrStars"]:checked') || {}).value || '34';
+    const corr = (document.querySelector('input[name="adrCorr"]:checked') || {}).value || 'yes';
+    const unit = (document.querySelector('input[name="adrUnit"]:checked') || {}).value || 'room';
+    const vat = (document.querySelector('input[name="adrVat"]:checked') || {}).value || 'none';
+    let coeff = 1;
+    if (corr === 'yes') coeff = stars === '5' ? 0.75 : 0.8;
+    const vatDiv = vat === 'strip' ? 1.22 : 1;
+    const adj = v => (v * coeff) / vatDiv;
+    const unitPerson = unit === 'person';
+
+    const groups = {};
+    data.rows.forEach(row => {
+        const g = adrGroupName(row.name);
+        if (!groups[g]) groups[g] = { name: g, rooms: 0, months: Array(12).fill(0), wRooms: Array(12).fill(0) };
+        const mp = monthPriceForRow(row, data.periods, unitPerson);
+        groups[g].rooms += row.rooms;
+        mp.forEach((p, m) => {
+            groups[g].months[m] += p * row.rooms;
+            groups[g].wRooms[m] += row.rooms;
+        });
+    });
+    const cats = Object.values(groups).map(g => {
+        const months = g.months.map((s, m) => g.wRooms[m] ? adj(s / g.wRooms[m]) : 0);
+        const quarters = [0, 1, 2, 3].map(q => {
+            let w = 0, d = 0;
+            for (let m = q * 3; m < q * 3 + 3; m++) {
+                w += months[m] * ADR_MONTH_DAYS[m];
+                d += ADR_MONTH_DAYS[m];
+            }
+            return d ? w / d : 0;
+        });
+        return { name: g.name, rooms: g.rooms, months, quarters };
+    });
+    const totalRooms = cats.reduce((s, c) => s + c.rooms, 0) || 1;
+    const hotelQ = [0, 1, 2, 3].map(q => cats.reduce((s, c) => s + c.quarters[q] * c.rooms, 0) / totalRooms);
+    const qDays = [0, 1, 2, 3].map(q => ADR_MONTH_DAYS[q * 3] + ADR_MONTH_DAYS[q * 3 + 1] + ADR_MONTH_DAYS[q * 3 + 2]);
+    const yearAdr = qDays.reduce((s, d, i) => s + hotelQ[i] * d, 0) / qDays.reduce((a, b) => a + b, 0);
+    return { cats, hotelQ, yearAdr, totalRooms, coeff, vatDiv, unitPerson };
+}
+
+function adrTableHtml(headers, bodyRows) {
+    const head = '<tr>' + headers.map(h => '<th>' + h + '</th>').join('') + '</tr>';
+    const body = bodyRows.map(r => '<tr>' + r.map((c, i) => '<td' + (i === 0 ? ' class="category-label"' : '') + '>' + c + '</td>').join('') + '</tr>').join('');
+    return '<table><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+}
+
+function renderAdr() {
+    if (!adrParsed) return;
+    const res = computeAdr(adrParsed);
+    const prevHead = ['Категория', 'Номеров', 'Человек'].concat(adrParsed.periods.map(p => p.label));
+    const prevBody = adrParsed.rows.map(r => [r.name, r.rooms, r.people].concat(r.prices.map(adrFmt)));
+    document.getElementById('adrPreviewWrap').innerHTML = '<h3 style="color:var(--accent);margin-bottom:8px;">Исходный прайс</h3>' + adrTableHtml(prevHead, prevBody);
+
+    const mHead = ['Категория', 'Номеров'].concat(ADR_MONTH_NAMES);
+    const mBody = res.cats.map(c => [c.name, c.rooms].concat(c.months.map(adrFmt)));
+    document.getElementById('adrMonthWrap').innerHTML = '<h3 style="color:var(--accent);margin-bottom:8px;">Средневзвешенные цены по месяцам, руб.</h3>' + adrTableHtml(mHead, mBody);
+
+    const qHead = ['Категория / гостиница', 'Номеров', 'I кв.', 'II кв.', 'III кв.', 'IV кв.', 'Год'];
+    const qBody = res.cats.map(c => {
+        const yd = ADR_MONTH_DAYS.reduce((s, d, i) => s + c.months[i] * d, 0) / 365;
+        return [c.name, c.rooms].concat(c.quarters.map(adrFmt)).concat([adrFmt(yd)]);
+    });
+    qBody.push(['Итого по гостинице', res.totalRooms].concat(res.hotelQ.map(adrFmt)).concat([adrFmt(res.yearAdr)]));
+    document.getElementById('adrQuarterWrap').innerHTML = '<h3 style="color:var(--accent);margin-bottom:8px;">ADR по кварталам и за год, руб.</h3>' + adrTableHtml(qHead, qBody);
+}
+
+function downloadAdrTemplate() {
+    const aoa = [
+        ['', 'Категория номера', 'Количество номеров', 'Количество человек', 'Стоимость в разный период', '', '', '', ''],
+        ['', '', '', ''].concat(ADR_TEMPLATE_PERIODS),
+        ...ADR_TEMPLATE_ROWS.map(r => [''].concat(r))
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Лист1');
+    XLSX.writeFile(wb, 'Шаблон_ADR.xlsx');
+}
+
+function initAdrRef() {
+    adrParsed = buildAdrFromTemplate();
+    const file = document.getElementById('adrTemplateFile');
+    if (file) file.addEventListener('change', function() {
+        const f = this.files && this.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                const sheet = wb.Sheets[wb.SheetNames[0]];
+                adrParsed = parseAdrAoa(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }));
+                document.getElementById('adrSourceLabel').textContent = 'Загружен файл: ' + f.name;
+                renderAdr();
+            } catch (err) {
+                alert('Не удалось прочитать таблицу: ' + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(f);
+        this.value = '';
+    });
+    const sampleBtn = document.getElementById('adrLoadSampleBtn');
+    if (sampleBtn) sampleBtn.addEventListener('click', function() {
+        adrParsed = buildAdrFromTemplate();
+        document.getElementById('adrSourceLabel').textContent = 'Загружен пример из шаблона.';
+        renderAdr();
+    });
+    const dl = document.getElementById('adrDownloadTemplateBtn');
+    if (dl) dl.addEventListener('click', downloadAdrTemplate);
+    const recalc = document.getElementById('adrRecalcBtn');
+    if (recalc) recalc.addEventListener('click', renderAdr);
+    document.querySelectorAll('.adr-ref-block input[type="radio"]').forEach(el => {
+        el.addEventListener('change', renderAdr);
+    });
+    renderAdr();
+}
+
 window.addEventListener('load', function() {
     try { initRevenueForm(); } catch (e) {}
     try { loadInputsOverlay(); } catch (e) {}
@@ -8540,6 +8855,7 @@ window.addEventListener('load', function() {
     try { initReconciliation(); } catch (e) {}
     try { updateObjectTable(); } catch (e) {}
     try { recalcReconciliation(); } catch (e) {}
+    try { initAdrRef(); } catch (e) {}
     const openInputsBtn = document.getElementById('openInputsFromMdpBtn');
     if (openInputsBtn) openInputsBtn.addEventListener('click', () => showStep(4));
     const savedStep = parseInt(localStorage.getItem('currentStep')) || 0;
